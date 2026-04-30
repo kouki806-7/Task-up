@@ -15,7 +15,8 @@ let state = {
     settings: {
         apiKey: 'AIzaSyDy-UDkVaLk5zLkojM3IOtzPZTwFpCtfSA',
         clientId: '402677092902-bceev6me91ekc1so00g2h96doqd1ripr.apps.googleusercontent.com',
-        firebaseConfig: null
+        firebaseConfig: null,
+        layoutMode: 'auto'
     }
 };
 
@@ -34,9 +35,11 @@ function loadData() {
             state.settings = {
                 apiKey: 'AIzaSyDy-UDkVaLk5zLkojM3IOtzPZTwFpCtfSA',
                 clientId: '402677092902-bceev6me91ekc1so00g2h96doqd1ripr.apps.googleusercontent.com',
-                firebaseConfig: null
+                firebaseConfig: null,
+                layoutMode: 'auto'
             };
         }
+        if (!state.settings.layoutMode) state.settings.layoutMode = 'auto';
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
@@ -281,8 +284,15 @@ async function saveToCloud() {
 // --- Initialization ---
 function init() {
     loadData();
+    applyLayoutMode();
     setupEventListeners();
     
+    window.addEventListener('resize', () => {
+        if (state.settings && state.settings.layoutMode === 'auto') {
+            applyLayoutMode();
+        }
+    });
+
     // Set today's display date
     const today = new Date();
     dateDisplay.textContent = today.toLocaleDateString('ja-JP', { weekday: 'short', month: 'long', day: 'numeric' });
@@ -321,6 +331,11 @@ function switchView(viewId) {
         if (state.settings && inputClientId && inputApiKey) {
             inputClientId.value = state.settings.clientId || '';
             inputApiKey.value = state.settings.apiKey || '';
+        }
+        
+        const layoutSelect = document.getElementById('setting-layout-mode');
+        if (layoutSelect && state.settings) {
+            layoutSelect.value = state.settings.layoutMode || 'auto';
         }
     }
 }
@@ -487,6 +502,37 @@ function setupEventListeners() {
         btnLogout.addEventListener('click', () => {
             if (auth) auth.signOut();
         });
+    }
+
+    // Layout Settings
+    const layoutSelect = document.getElementById('setting-layout-mode');
+    if (layoutSelect) {
+        layoutSelect.addEventListener('change', (e) => {
+            if (!state.settings) state.settings = {};
+            state.settings.layoutMode = e.target.value;
+            saveData();
+            applyLayoutMode();
+        });
+    }
+}
+
+function applyLayoutMode() {
+    const mode = state.settings ? (state.settings.layoutMode || 'auto') : 'auto';
+    const body = document.body;
+    
+    body.classList.remove('pc-layout', 'mobile-layout');
+    
+    if (mode === 'mobile') {
+        body.classList.add('mobile-layout');
+    } else if (mode === 'pc') {
+        body.classList.add('pc-layout');
+    } else {
+        // Auto
+        if (window.innerWidth <= 768) {
+            body.classList.add('mobile-layout');
+        } else {
+            body.classList.add('pc-layout');
+        }
     }
 }
 

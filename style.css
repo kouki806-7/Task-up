@@ -839,3 +839,94 @@ textarea {
     -webkit-box-orient: vertical;
     word-break: break-all;
 }
+
+/* ==============================================
+   Mobile Layout Override
+   ============================================== */
+.mobile-layout .sidebar {
+    width: 100%;
+    height: 70px;
+    bottom: 0;
+    top: auto;
+    flex-direction: row;
+    padding: 0.5rem;
+    z-index: 100;
+    border-right: none;
+    border-top: 1px solid var(--panel-border);
+    justify-content: space-around;
+    align-items: center;
+}
+
+.mobile-layout .logo {
+    display: none; /* Hide logo in bottom nav */
+}
+
+.mobile-layout .nav-links {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+    gap: 0;
+}
+
+.mobile-layout .nav-links li {
+    flex-direction: column;
+    padding: 6px;
+    font-size: 0.65rem;
+    gap: 4px;
+}
+
+.mobile-layout .nav-links li svg {
+    width: 20px;
+    height: 20px;
+}
+
+.mobile-layout .main-content {
+    margin-left: 0;
+    padding: 1rem;
+    padding-bottom: 80px; /* Clear bottom nav */
+}
+
+.mobile-layout .content-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+}
+
+.mobile-layout .history-grid {
+    grid-template-columns: 1fr;
+}
+
+.mobile-layout .view-header h1 {
+    font-size: 1.8rem;
+}
+
+.mobile-layout .view-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.mobile-layout .calendar-controls {
+    width: 100%;
+    margin-top: 0.5rem;
+    justify-content: space-between;
+}
+
+/* Horizontal scrolling for weekly schedule */
+.mobile-layout .weekly-grid {
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+}
+
+.mobile-layout .weekly-column {
+    min-width: 85vw; /* Almost full width per day */
+    scroll-snap-align: start;
+}
+
+.mobile-layout .modal {
+    width: 95%;
+    padding: 1.5rem;
+}
+

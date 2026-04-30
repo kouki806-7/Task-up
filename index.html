@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -49,23 +49,6 @@
                     設定
                 </li>
             </ul>
-
-            <div class="user-profile" style="margin-top: auto; padding-top: 2rem; border-top: 1px solid var(--panel-border);">
-                <div id="auth-logged-out">
-                    <button id="btn-firebase-login" class="btn secondary w-full" style="font-size: 0.85rem;">Googleでログイン</button>
-                    <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 8px; text-align: center;">クラウド同期を有効化</p>
-                </div>
-                <div id="auth-logged-in" style="display: none; align-items: center; gap: 10px;">
-                    <img id="user-avatar" src="" alt="User Avatar" style="width: 32px; height: 32px; border-radius: 50%;">
-                    <div style="flex: 1; overflow: hidden;">
-                        <div id="user-name" style="font-size: 0.85rem; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;"></div>
-                        <div id="sync-status" style="font-size: 0.7rem; color: var(--success-color);">同期済 ✓</div>
-                    </div>
-                    <button id="btn-firebase-logout" class="icon-btn" title="ログアウト">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                    </button>
-                </div>
-            </div>
         </nav>
 
         <!-- Main Content Area -->
@@ -261,6 +244,29 @@
                 </header>
                 <div class="content-grid" style="grid-template-columns: 1fr;">
                     <div class="panel">
+                        <h3>アカウントと同期状態</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
+                            Firebaseクラウドとタスクを同期するためのGoogleアカウントです。
+                        </p>
+                        <div class="user-profile" style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--panel-border);">
+                            <div id="auth-logged-out">
+                                <button id="btn-firebase-login" class="btn primary w-full">Googleでログイン</button>
+                                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 12px; text-align: center;">ログインしてクラウド同期を有効化します</p>
+                            </div>
+                            <div id="auth-logged-in" style="display: none; align-items: center; gap: 16px;">
+                                <img id="user-avatar" src="" alt="User Avatar" style="width: 48px; height: 48px; border-radius: 50%;">
+                                <div style="flex: 1; overflow: hidden;">
+                                    <div id="user-name" style="font-size: 1.1rem; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;"></div>
+                                    <div id="sync-status" style="font-size: 0.85rem; color: var(--success-color); margin-top: 4px;">同期済 ✓</div>
+                                </div>
+                                <button id="btn-firebase-logout" class="btn secondary" title="ログアウト">
+                                    ログアウト
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
                         <h3>Google Calendar API 連携</h3>
                         <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
                             スケジュール画面で「Google同期」を行うための設定です。Google Cloudから取得したキーを入力してください。
@@ -291,6 +297,23 @@
                             </div>
                             <button type="submit" class="btn primary">Firebase設定を保存</button>
                             <span id="firebase-save-msg" style="margin-left: 1rem; color: var(--success-color); opacity: 0; transition: opacity 0.3s;">設定を反映しました。リロードしてください。</span>
+                        </form>
+                    </div>
+                    
+                    <div class="panel">
+                        <h3>表示レイアウト設定</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
+                            画面の表示形式を選択します。「自動判別」は画面サイズに合わせて自動で切り替わります。
+                        </p>
+                        <form id="layout-settings-form">
+                            <div class="input-group">
+                                <label for="setting-layout-mode" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">レイアウトモード</label>
+                                <select id="setting-layout-mode" style="width: 100%; padding: 0.75rem; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--bg-color); color: var(--text-primary); font-family: inherit;">
+                                    <option value="auto">自動判別 (Auto)</option>
+                                    <option value="pc">PC版 (強制)</option>
+                                    <option value="mobile">スマホ版 (強制)</option>
+                                </select>
+                            </div>
                         </form>
                     </div>
                 </div>
@@ -325,6 +348,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>
