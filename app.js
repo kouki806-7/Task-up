@@ -175,6 +175,39 @@ function initGAPI() {
     }
 }
 
+// --- Timer State ---
+let timerInterval = null;
+let timerSeconds = 0;
+let timerTaskId = null;
+let timerStartTime = null;
+
+function formatTimer(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateTimerSelect() {
+    const select = document.getElementById('timer-task-select');
+    if (!select) return;
+    
+    const val = select.value;
+    select.innerHTML = '<option value="">(タスクを選択してください)</option>';
+    
+    const activeTasks = state.tasks.filter(t => !t.completed);
+    activeTasks.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.text;
+        select.appendChild(opt);
+    });
+    
+    if (activeTasks.find(t => t.id === val)) {
+        select.value = val;
+    }
+}
+
 // --- Firebase Sync ---
 let db = null;
 let auth = null;
@@ -403,22 +436,36 @@ function setupEventListeners() {
         renderWeeklySchedule();
     });
 
-    if(formSchedule) {
+    const formSchedule = document.getElementById('add-schedule-form');
+    if (formSchedule) {
         const dateInput = document.getElementById('schedule-date');
         if (dateInput) dateInput.value = getTodayString();
         formSchedule.addEventListener('submit', (e) => {
             e.preventDefault();
             const date = document.getElementById('schedule-date').value;
-            const start = document.getElementById('schedule-start').value;
-            const end = document.getElementById('schedule-end').value;
-            const tag = document.getElementById('schedule-tag').value;
+            const startStr = document.getElementById('schedule-start').value;
+            const endStr = document.getElementById('schedule-end').value;
             const title = document.getElementById('schedule-title').value.trim();
+            const tag = document.getElementById('schedule-tag').value;
             const memo = document.getElementById('schedule-memo').value.trim();
+            const isRecord = document.getElementById('schedule-is-record') ? document.getElementById('schedule-is-record').checked : false;
             
-            if(title && date && start && end) {
-                addSchedule(title, date, start, end, tag, memo);
+            const finalTag = isRecord ? 'record' : tag;
+            
+            if(title && date && startStr && endStr) {
+                state.schedules.push({
+                    id: generateId(),
+                    title: title,
+                    date: date,
+                    startTime: startStr,
+                    endTime: endStr,
+                    tag: finalTag,
+                    memo: memo
+                });
+                saveData();
                 document.getElementById('schedule-title').value = '';
                 document.getElementById('schedule-memo').value = '';
+                renderWeeklySchedule();
             }
         });
     }
@@ -514,6 +561,111 @@ function setupEventListeners() {
             applyLayoutMode();
         });
     }
+
+    // Timer Handlers
+    const btnTimerStart = document.getElementById('btn-timer-start');
+    const btnTimerPause = document.getElementById('btn-timer-pause');
+    const btnTimerFinish = document.getElementById('btn-timer-finish');
+    const timerDisplay = document.getElementById('timer-display');
+    const timerSelect = document.getElementById('timer-task-select');
+    
+    if (btnTimerStart) {
+        btnTimerStart.addEventListener('click', () => {
+            const taskId = timerSelect.value;
+            if (!taskId) {
+                alert("タスクを選択してください");
+                return;
+            }
+            
+            if (!timerInterval) {
+                if (timerSeconds === 0) {
+                    timerStartTime = new Date();
+                    timerTaskId = taskId;
+                }
+                timerInterval = setInterval(() => {
+                    timerSeconds++;
+                    timerDisplay.textContent = formatTimer(timerSeconds);
+                }, 1000);
+                
+                timerSelect.disabled = true;
+                btnTimerStart.style.display = 'none';
+                btnTimerPause.style.display = 'block';
+                btnTimerFinish.disabled = false;
+            }
+        });
+    }
+    
+    if (btnTimerPause) {
+        btnTimerPause.addEventListener('click', () => {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+                btnTimerPause.style.display = 'none';
+                btnTimerStart.style.display = 'block';
+                btnTimerStart.textContent = '▶ 再開';
+            }
+        });
+    }
+    
+    if (btnTimerFinish) {
+        btnTimerFinish.addEventListener('click', () => {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+            
+            if (timerSeconds < 60) {
+                alert("1分未満のため、実績として記録されません。");
+            } else {
+                const task = state.tasks.find(t => t.id === timerTaskId);
+                if (task) {
+                    task.completed = true;
+                    
+                    const now = new Date();
+                    const startD = timerStartTime;
+                    const endD = now;
+                    
+                    const startStr = `${startD.getHours().toString().padStart(2, '0')}:${startD.getMinutes().toString().padStart(2, '0')}`;
+                    const endStr = `${endD.getHours().toString().padStart(2, '0')}:${endD.getMinutes().toString().padStart(2, '0')}`;
+                    
+                    let dateStr = getTodayString();
+                    if (now.getHours() < 5) {
+                        const prevDay = new Date(now);
+                        prevDay.setDate(prevDay.getDate() - 1);
+                        dateStr = prevDay.toLocaleDateString('en-CA');
+                    }
+                    
+                    state.schedules.push({
+                        id: generateId(),
+                        title: task.text,
+                        date: dateStr,
+                        startTime: startStr,
+                        endTime: endStr,
+                        tag: 'record',
+                        memo: `タイマー記録: ${formatTimer(timerSeconds)}`
+                    });
+                    
+                    const dateStr = getTodayString();
+                    if (!state.history[dateStr]) state.history[dateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
+                    state.history[dateStr].tasksCompleted++;
+                }
+            }
+            
+            timerSeconds = 0;
+            timerTaskId = null;
+            timerStartTime = null;
+            timerDisplay.textContent = '00:00:00';
+            timerSelect.disabled = false;
+            timerSelect.value = '';
+            btnTimerPause.style.display = 'none';
+            btnTimerStart.style.display = 'block';
+            btnTimerStart.textContent = '▶ 開始';
+            btnTimerFinish.disabled = true;
+            
+            saveData();
+            if (document.getElementById('view-schedule').classList.contains('active')) {
+                renderWeeklySchedule();
+            }
+        });
+    }
 }
 
 function applyLayoutMode() {
@@ -576,16 +728,6 @@ function deleteTask(id) {
     state.tasks = state.tasks.filter(t => t.id !== id);
     // Note: We don't delete from routines automatically to prevent accidental loss of routine template
     saveData();
-}
-
-function addSchedule(title, date, startTime, endTime, tag, memo, gcalId = null) {
-    state.schedules.push({
-        id: generateId(), gcalId, title, date, startTime, endTime, tag, memo
-    });
-    saveData();
-    if (document.getElementById('view-schedule').classList.contains('active')) {
-        renderWeeklySchedule();
-    }
 }
 
 async function fetchGoogleCalendarEvents() {
@@ -679,7 +821,9 @@ function smartParse(rawText, importType = 'task') {
             if (endMins < startMins) endMins += 24 * 60; // crossed midnight
             
             if (importType === 'schedule') {
-                addSchedule(name, getTodayString(), startStr, endStr, 'カレンダー', '');
+                // Simplified schedule logic for parsing
+                const day = new Date().getDay();
+                state.schedules.push({ id: generateId(), title: name, dayIndex: day, startHour: sh + sm/60, endHour: eh + em/60, tag: 'カレンダー', memo: '' });
             } else {
                 const duration = endMins - startMins;
                 addTask(name, duration, false, 'カレンダー', getTodayString());
@@ -704,6 +848,7 @@ function smartParse(rawText, importType = 'task') {
 
 // --- Rendering Dashboard ---
 function renderDashboard() {
+    updateTimerSelect();
     listActive.innerHTML = '';
     listCompleted.innerHTML = '';
 
@@ -933,21 +1078,65 @@ function renderStats(period) {
         }
     }
 
-    const agg = { '講義':0, '勉強・課題':0, '趣味・遊び':0, 'タスク':0, 'カレンダー':0 };
+    const tagCounts = { '講義':0, '勉強・課題':0, '趣味・遊び':0, 'タスク':0, 'カレンダー':0 };
     let totalMins = 0;
 
     dates.forEach(dateStr => {
         const h = state.history[dateStr];
         if (h && h.durationByTag) {
             Object.keys(h.durationByTag).forEach(tag => {
-                agg[tag] = (agg[tag] || 0) + h.durationByTag[tag];
+                tagCounts[tag] = (tagCounts[tag] || 0) + h.durationByTag[tag];
                 totalMins += h.durationByTag[tag];
             });
         }
     });
 
+    // Achievement Rate
+    let plannedTotal = 0;
+    let recordedTotal = 0;
+    state.schedules.forEach(s => {
+        if (!s.startTime || !s.endTime) return;
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        
+        let startH = sh + sm / 60;
+        let endH = eh + em / 60;
+        if (endH < startH) endH += 24;
+        const duration = endH - startH;
+        
+        if (s.tag === 'record') {
+            recordedTotal += duration;
+        } else if (s.tag !== 'カレンダー' && s.tag !== 'calendar') {
+            plannedTotal += duration;
+        }
+    });
+    
+    let achievePct = 0;
+    if (plannedTotal > 0) {
+        achievePct = Math.min(100, Math.round((recordedTotal / plannedTotal) * 100));
+    }
+    
+    const ring = document.getElementById('stats-achievement-ring');
+    const percentText = document.getElementById('stats-achievement-percent');
+    const elPlanned = document.getElementById('stats-planned-hours');
+    const elRecorded = document.getElementById('stats-recorded-hours');
+    
+    if (ring && percentText) {
+        const circumference = 54 * 2 * Math.PI;
+        const offset = circumference - (achievePct / 100) * circumference;
+        ring.style.strokeDashoffset = offset;
+        percentText.textContent = achievePct + '%';
+        elPlanned.textContent = plannedTotal.toFixed(1) + ' 時間';
+        elRecorded.textContent = recordedTotal.toFixed(1) + ' 時間';
+    }
+
     statsContent.innerHTML = '';
-    if (totalMins === 0) {
+    
+    let hasData = false;
+    for (let t in tagCounts) {
+        if (tagCounts[t] > 0) hasData = true;
+    }
+    if (!hasData) {
         statsContent.innerHTML = '<p class="empty-state">完了したタスクのデータがありません。</p>';
         return;
     }
@@ -961,11 +1150,11 @@ function renderStats(period) {
     };
 
     // Sort by duration descending
-    const sortedTags = Object.keys(agg).sort((a, b) => agg[b] - agg[a]);
+    const sortedTags = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
 
     sortedTags.forEach(tag => {
-        if (agg[tag] === 0) return;
-        const mins = agg[tag];
+        if (tagCounts[tag] === 0) return;
+        const mins = tagCounts[tag];
         const hours = Math.floor(mins / 60);
         const m = mins % 60;
         const timeStr = hours > 0 ? `${hours}時間 ${m}分` : `${m}分`;
@@ -1055,7 +1244,8 @@ function renderWeeklySchedule() {
             '勉強・課題': 'rgba(16, 185, 129, 0.4)',
             '趣味・遊び': 'rgba(245, 158, 11, 0.4)',
             'タスク': 'rgba(139, 92, 246, 0.4)',
-            'カレンダー': 'rgba(239, 68, 68, 0.4)'
+            'カレンダー': 'rgba(239, 68, 68, 0.4)',
+            'record': 'rgba(244, 63, 94, 0.6)'
         };
 
         const tagBorderMap = {
@@ -1063,7 +1253,8 @@ function renderWeeklySchedule() {
             '勉強・課題': '#10b981',
             '趣味・遊び': '#f59e0b',
             'タスク': '#8b5cf6',
-            'カレンダー': '#ef4444'
+            'カレンダー': '#ef4444',
+            'record': '#f43f5e'
         };
 
         daySchedules.forEach(sched => {
@@ -1081,7 +1272,7 @@ function renderWeeklySchedule() {
             const height = endMins - startMins;
 
             const block = document.createElement('div');
-            block.className = 'schedule-block';
+            block.className = `schedule-block ${sched.tag === 'record' ? 'record-block' : ''}`;
             block.style.top = `${top}px`;
             block.style.height = `${height}px`;
             block.style.backgroundColor = tagColorMap[sched.tag] || tagColorMap['タスク'];

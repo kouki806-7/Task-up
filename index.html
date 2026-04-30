@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=7">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -103,6 +103,20 @@
 
                         <div class="divider"><span>または</span></div>
 
+                        <!-- Timer Panel -->
+                        <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--panel-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.5rem; text-align: center;">
+                            <h3 style="justify-content: center; margin-bottom: 1rem;">⏱️ 実行タイマー</h3>
+                            <select id="timer-task-select" style="width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: var(--radius-sm); background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border); color: var(--text-primary);">
+                                <option value="">(タスクを選択してください)</option>
+                            </select>
+                            <div id="timer-display" style="font-size: 3rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 1.5rem; color: var(--primary-color); text-shadow: 0 0 20px var(--primary-glow);">00:00:00</div>
+                            <div style="display: flex; gap: 10px; justify-content: center;">
+                                <button id="btn-timer-start" class="btn primary" style="flex: 1;">▶ 開始</button>
+                                <button id="btn-timer-pause" class="btn secondary" style="flex: 1; display: none;">⏸ 停止</button>
+                                <button id="btn-timer-finish" class="btn secondary" style="flex: 1; border-color: var(--success-color); color: var(--success-color);" disabled>✅ 完了</button>
+                            </div>
+                        </div>
+
                         <h3>スマートインポート</h3>
                         <div class="input-group" style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
                             <label class="checkbox-group"><input type="radio" name="import-type" value="task" checked> タスクに追加</label>
@@ -171,6 +185,12 @@
                             </div>
                         </div>
                         <div class="input-group" style="margin-bottom: 1rem;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">
+                                <input type="checkbox" id="schedule-is-record" style="width: 16px; height: 16px;">
+                                <span>事後入力 (実績として記録する)</span>
+                            </label>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 1rem;">
                             <input type="text" id="schedule-title" placeholder="予定のタイトル..." required>
                         </div>
                         <div class="input-group" style="margin-bottom: 1rem;">
@@ -219,12 +239,35 @@
             <!-- Stats View -->
             <section id="view-stats" class="view">
                 <header class="view-header">
-                    <h1>統計</h1>
-                    <p class="subtitle">タグごとに使った時間を確認します。</p>
+                    <div>
+                        <h1>統計</h1>
+                        <p class="subtitle">学習やタスクの傾向を分析します</p>
+                    </div>
                 </header>
                 <div class="content-grid" style="grid-template-columns: 1fr;">
+                    
+                    <div class="panel" style="margin-bottom: 2rem;">
+                        <h3>スケジュールの達成率 (実績 / 予定)</h3>
+                        <div style="display: flex; align-items: center; gap: 2rem;">
+                            <div class="progress-ring-container" style="width: 120px; height: 120px;">
+                                <svg width="120" height="120" viewBox="0 0 120 120">
+                                    <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="12"/>
+                                    <circle id="stats-achievement-ring" cx="60" cy="60" r="54" fill="none" stroke="var(--success-color)" stroke-width="12" stroke-dasharray="339.292" stroke-dashoffset="339.292" stroke-linecap="round" class="progress-ring__circle"/>
+                                </svg>
+                                <span id="stats-achievement-percent" class="progress-text-percent" style="font-size: 1.5rem;">0%</span>
+                            </div>
+                            <div>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 4px;">今週の予定時間</p>
+                                <p id="stats-planned-hours" style="font-size: 1.5rem; font-weight: 700; margin-bottom: 12px;">0 時間</p>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 4px;">記録された実績時間</p>
+                                <p id="stats-recorded-hours" style="font-size: 1.5rem; font-weight: 700; color: #f43f5e;">0 時間</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="panel">
-                        <div class="stats-controls" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+                        <h3>タグ別の使用時間</h3>
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem;">
                             <button class="btn secondary active" id="btn-stat-daily">日毎 (今日)</button>
                             <button class="btn secondary" id="btn-stat-weekly">週ごと (今週)</button>
                             <button class="btn secondary" id="btn-stat-monthly">月ごと (今月)</button>
@@ -348,6 +391,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

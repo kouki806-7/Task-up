@@ -930,3 +930,30 @@ textarea {
     padding: 1.5rem;
 }
 
+
+/* ==============================================
+   Timer Record Schedule Overlap Styles
+   ============================================== */
+.tag-badge.tag-record { 
+    background: rgba(244, 63, 94, 0.2); 
+    color: #fb7185; 
+    border: 1px solid rgba(244, 63, 94, 0.4); 
+}
+
+.schedule-block[style*="border-left-color: #f43f5e"] {
+    margin-left: 15px;
+    width: calc(100% - 19px) !important;
+    opacity: 0.95;
+    z-index: 5;
+    box-shadow: -4px 0 10px rgba(0,0,0,0.3);
+}
+
+
+.schedule-block.record-block {
+    margin-left: 15px;
+    width: calc(100% - 19px) !important;
+    opacity: 0.95;
+    z-index: 5;
+    box-shadow: -4px 0 10px rgba(0,0,0,0.3);
+}
+
