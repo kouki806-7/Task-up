@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>タスク管理 - Daily Flow</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=5">
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
+    <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                <h2>Daily Flow</h2>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-view="dashboard">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    ダッシュボード
+                </li>
+                <li data-view="history">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    履歴
+                </li>
+                <li data-view="schedule">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    スケジュール
+                </li>
+                <li data-view="stats">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg>
+                    統計
+                </li>
+                <li id="nav-reflection">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    今日を振り返る
+                </li>
+                <li data-view="settings">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    設定
+                </li>
+            </ul>
+
+            <div class="user-profile" style="margin-top: auto; padding-top: 2rem; border-top: 1px solid var(--panel-border);">
+                <div id="auth-logged-out">
+                    <button id="btn-firebase-login" class="btn secondary w-full" style="font-size: 0.85rem;">Googleでログイン</button>
+                    <p style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 8px; text-align: center;">クラウド同期を有効化</p>
+                </div>
+                <div id="auth-logged-in" style="display: none; align-items: center; gap: 10px;">
+                    <img id="user-avatar" src="" alt="User Avatar" style="width: 32px; height: 32px; border-radius: 50%;">
+                    <div style="flex: 1; overflow: hidden;">
+                        <div id="user-name" style="font-size: 0.85rem; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;"></div>
+                        <div id="sync-status" style="font-size: 0.7rem; color: var(--success-color);">同期済 ✓</div>
+                    </div>
+                    <button id="btn-firebase-logout" class="icon-btn" title="ログアウト">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Dashboard View -->
+            <section id="view-dashboard" class="view active">
+                <header class="view-header">
+                    <div>
+                        <h1 id="current-date-display">今日</h1>
+                        <p class="subtitle" id="progress-text">さあ、始めましょう。</p>
+                    </div>
+                    <div class="progress-ring-container">
+                        <svg class="progress-ring" width="60" height="60">
+                            <circle class="progress-ring__circle bg" stroke="var(--border-color)" stroke-width="4" fill="transparent" r="26" cx="30" cy="30"/>
+                            <circle class="progress-ring__circle fg" id="daily-progress-ring" stroke="var(--primary-color)" stroke-width="4" fill="transparent" r="26" cx="30" cy="30"/>
+                        </svg>
+                        <span class="progress-text-percent" id="daily-progress-percent">0%</span>
+                    </div>
+                </header>
+
+                <div class="content-grid">
+                    <!-- Task Input Area -->
+                    <div class="panel input-panel">
+                        <h3>タスクを追加</h3>
+                        <form id="add-task-form">
+                            <div class="input-group">
+                                <input type="text" id="task-name" placeholder="タスク名を入力..." required>
+                            </div>
+                            <div class="input-row" style="margin-bottom: 1rem;">
+                                <div class="input-group" style="width: 140px; margin-bottom: 0;">
+                                    <select id="task-tag" style="width: 100%; padding: 12px 16px; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem;">
+                                        <option value="タスク" style="color: #000">タスク</option>
+                                        <option value="講義" style="color: #000">講義</option>
+                                        <option value="勉強・課題" style="color: #000">勉強・課題</option>
+                                        <option value="趣味・遊び" style="color: #000">趣味・遊び</option>
+                                        <option value="カレンダー" style="color: #000">カレンダー</option>
+                                    </select>
+                                </div>
+                                <div class="input-group" style="width: 160px; margin-bottom: 0;">
+                                    <input type="number" id="task-duration" placeholder="分" min="1" max="1440">
+                                </div>
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <select id="task-routine" style="width: 100%; padding: 12px 16px; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem;">
+                                        <option value="false" style="color: #000">今日だけ</option>
+                                        <option value="true" style="color: #000">毎日</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn primary" style="white-space: nowrap;">追加</button>
+                            </div>
+                        </form>
+
+                        <div class="divider"><span>または</span></div>
+
+                        <h3>スマートインポート</h3>
+                        <div class="input-group" style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+                            <label class="checkbox-group"><input type="radio" name="import-type" value="task" checked> タスクに追加</label>
+                            <label class="checkbox-group"><input type="radio" name="import-type" value="schedule"> スケジュールに追加</label>
+                        </div>
+                        <p class="help-text">Googleカレンダーのテキストを貼り付け</p>
+                        <textarea id="gcal-import" rows="3" placeholder="例: 10:00～11:00 ミーティング..."></textarea>
+                        <button id="btn-import" class="btn secondary w-full">解析して追加</button>
+                    </div>
+
+                    <!-- Task List Area -->
+                    <div class="panel task-list-panel">
+                        <h3>未完了タスク <span class="badge" id="active-count">0</span></h3>
+                        <ul id="active-task-list" class="task-list">
+                            <!-- Tasks injected here -->
+                        </ul>
+
+                        <h3 class="mt-xl">完了済み <span class="badge" id="completed-count">0</span></h3>
+                        <ul id="completed-task-list" class="task-list completed-list">
+                            <!-- Tasks injected here -->
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Schedule View -->
+            <section id="view-schedule" class="view">
+                <header class="view-header">
+                    <div>
+                        <h1 id="schedule-week-display">今週</h1>
+                        <p class="subtitle">スケジュールとタスクの確認・登録</p>
+                    </div>
+                    <div class="calendar-controls" style="display: flex; align-items: center;">
+                        <button id="btn-sync-gcal" class="btn secondary" style="margin-right: 1rem; border-color: rgba(255,255,255,0.2);">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                            Google同期
+                        </button>
+                        <button id="prev-week" class="icon-btn">&larr;</button>
+                        <button id="next-week" class="icon-btn">&rarr;</button>
+                    </div>
+                </header>
+
+                <!-- Schedule Form -->
+                <div class="panel" style="margin-bottom: 2rem;">
+                    <h3>予定を追加</h3>
+                    <form id="add-schedule-form">
+                        <div class="input-row" style="margin-bottom: 1rem; flex-wrap: wrap;">
+                            <div class="input-group" style="width: 140px; margin-bottom: 0;">
+                                <input type="date" id="schedule-date" required>
+                            </div>
+                            <div class="input-group" style="width: 120px; margin-bottom: 0;">
+                                <input type="time" id="schedule-start" required>
+                            </div>
+                            <span style="display:flex; align-items:center;">〜</span>
+                            <div class="input-group" style="width: 120px; margin-bottom: 0;">
+                                <input type="time" id="schedule-end" required>
+                            </div>
+                            <div class="input-group" style="width: 140px; margin-bottom: 0;">
+                                <select id="schedule-tag" style="width: 100%; padding: 12px 16px; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem;">
+                                    <option value="タスク" style="color: #000">タスク</option>
+                                    <option value="講義" style="color: #000">講義</option>
+                                    <option value="勉強・課題" style="color: #000">勉強・課題</option>
+                                    <option value="趣味・遊び" style="color: #000">趣味・遊び</option>
+                                    <option value="カレンダー" style="color: #000">カレンダー</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 1rem;">
+                            <input type="text" id="schedule-title" placeholder="予定のタイトル..." required>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 1rem;">
+                            <textarea id="schedule-memo" rows="2" placeholder="備考 (MTGリンクや行先など)..."></textarea>
+                        </div>
+                        <button type="submit" class="btn primary">追加</button>
+                    </form>
+                </div>
+
+                <!-- Weekly Vertical Calendar -->
+                <div class="panel weekly-calendar-panel" style="overflow-x: auto; padding: 0;">
+                    <div class="weekly-grid" id="weekly-grid">
+                        <!-- 7 columns injected here via JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- History View -->
+            <section id="view-history" class="view">
+                <header class="view-header">
+                    <h1>履歴</h1>
+                    <p class="subtitle">過去の記録を振り返りましょう。</p>
+                </header>
+                <div class="content-grid history-grid">
+                    <div class="panel">
+                        <div class="calendar-controls">
+                            <button id="prev-month" class="icon-btn">&larr;</button>
+                            <h3 id="calendar-month-year">2026年5月</h3>
+                            <button id="next-month" class="icon-btn">&rarr;</button>
+                        </div>
+                        <div class="calendar-grid">
+                            <div class="weekday">日</div><div class="weekday">月</div><div class="weekday">火</div><div class="weekday">水</div><div class="weekday">木</div><div class="weekday">金</div><div class="weekday">土</div>
+                            <!-- Days injected here -->
+                            <div id="calendar-days" class="days-container"></div>
+                        </div>
+                    </div>
+                    <div class="panel history-detail-panel">
+                        <h3>詳細</h3>
+                        <div id="history-detail-content" class="empty-state">
+                            <p>日付を選択して振り返りを確認してください。</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats View -->
+            <section id="view-stats" class="view">
+                <header class="view-header">
+                    <h1>統計</h1>
+                    <p class="subtitle">タグごとに使った時間を確認します。</p>
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr;">
+                    <div class="panel">
+                        <div class="stats-controls" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+                            <button class="btn secondary active" id="btn-stat-daily">日毎 (今日)</button>
+                            <button class="btn secondary" id="btn-stat-weekly">週ごと (今週)</button>
+                            <button class="btn secondary" id="btn-stat-monthly">月ごと (今月)</button>
+                        </div>
+                        <div id="stats-content" class="stats-bars">
+                            <!-- Stats bars injected here -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section id="view-settings" class="view">
+                <header class="view-header">
+                    <h1>設定</h1>
+                    <p class="subtitle">API連携や各種設定を行います。</p>
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr;">
+                    <div class="panel">
+                        <h3>Google Calendar API 連携</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
+                            スケジュール画面で「Google同期」を行うための設定です。Google Cloudから取得したキーを入力してください。
+                        </p>
+                        <form id="settings-form">
+                            <div class="input-group">
+                                <label for="setting-client-id" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">OAuth クライアント ID</label>
+                                <input type="text" id="setting-client-id" placeholder="xxxx.apps.googleusercontent.com" required>
+                            </div>
+                            <div class="input-group">
+                                <label for="setting-api-key" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">API キー</label>
+                                <input type="text" id="setting-api-key" placeholder="AIzaSy..." required>
+                            </div>
+                            <button type="submit" class="btn primary">保存して適用</button>
+                            <span id="settings-save-msg" style="margin-left: 1rem; color: var(--success-color); opacity: 0; transition: opacity 0.3s;">保存しました！</span>
+                        </form>
+                    </div>
+                    
+                    <div class="panel">
+                        <h3>Firebase データ同期設定 (PC/スマホ共有)</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
+                            Firebase Consoleで発行された <code>firebaseConfig</code> の中身（中括弧 {} の部分）を貼り付けてください。
+                        </p>
+                        <form id="firebase-settings-form">
+                            <div class="input-group">
+                                <label for="setting-firebase-config" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">firebaseConfig JSON</label>
+                                <textarea id="setting-firebase-config" rows="6" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "..."}' required style="font-family: monospace;"></textarea>
+                            </div>
+                            <button type="submit" class="btn primary">Firebase設定を保存</button>
+                            <span id="firebase-save-msg" style="margin-left: 1rem; color: var(--success-color); opacity: 0; transition: opacity 0.3s;">設定を反映しました。リロードしてください。</span>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Reflection Modal -->
+    <div id="reflection-modal" class="modal-overlay">
+        <div class="modal">
+            <h2>今日の振り返り</h2>
+            <p>今日もお疲れ様でした！一言メモを残しましょう。</p>
+            <div class="stats-summary">
+                <div class="stat-box">
+                    <span class="stat-label">達成率</span>
+                    <span class="stat-value" id="modal-completion-rate">0%</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">タスク数</span>
+                    <span class="stat-value" id="modal-task-count">0/0</span>
+                </div>
+            </div>
+            <div class="input-group">
+                <label for="reflection-memo">一言メモ</label>
+                <textarea id="reflection-memo" rows="4" placeholder="今日良かったことや、明日に活かしたいこと..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button id="btn-cancel-reflection" class="btn ghost">キャンセル</button>
+                <button id="btn-save-reflection" class="btn primary">保存して一日を終了する</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=4"></script>
+</body>
+</html>
