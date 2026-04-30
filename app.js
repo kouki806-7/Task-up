@@ -195,7 +195,7 @@ function updateTimerSelect() {
     const val = select.value;
     select.innerHTML = '<option value="">(タスクを選択してください)</option>';
     
-    const activeTasks = state.tasks.filter(t => !t.completed);
+    const activeTasks = state.tasks.filter(t => !t.completed && t.date === getTodayString());
     activeTasks.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
@@ -856,6 +856,7 @@ function renderDashboard() {
     let completed = 0;
 
     state.tasks.forEach(task => {
+        if (task.date !== getTodayString()) return;
         const li = document.createElement('li');
         li.className = 'task-item';
         

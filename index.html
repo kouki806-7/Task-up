@@ -36,6 +36,10 @@
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                     スケジュール
                 </li>
+                <li data-view="timer">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    タイマー
+                </li>
                 <li data-view="stats">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg>
                     統計
@@ -103,20 +107,6 @@
 
                         <div class="divider"><span>または</span></div>
 
-                        <!-- Timer Panel -->
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--panel-border); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.5rem; text-align: center;">
-                            <h3 style="justify-content: center; margin-bottom: 1rem;">⏱️ 実行タイマー</h3>
-                            <select id="timer-task-select" style="width: 100%; padding: 10px; margin-bottom: 1rem; border-radius: var(--radius-sm); background: rgba(255,255,255,0.05); border: 1px solid var(--panel-border); color: var(--text-primary);">
-                                <option value="">(タスクを選択してください)</option>
-                            </select>
-                            <div id="timer-display" style="font-size: 3rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 1.5rem; color: var(--primary-color); text-shadow: 0 0 20px var(--primary-glow);">00:00:00</div>
-                            <div style="display: flex; gap: 10px; justify-content: center;">
-                                <button id="btn-timer-start" class="btn primary" style="flex: 1;">▶ 開始</button>
-                                <button id="btn-timer-pause" class="btn secondary" style="flex: 1; display: none;">⏸ 停止</button>
-                                <button id="btn-timer-finish" class="btn secondary" style="flex: 1; border-color: var(--success-color); color: var(--success-color);" disabled>✅ 完了</button>
-                            </div>
-                        </div>
-
                         <h3>スマートインポート</h3>
                         <div class="input-group" style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
                             <label class="checkbox-group"><input type="radio" name="import-type" value="task" checked> タスクに追加</label>
@@ -138,6 +128,29 @@
                         <ul id="completed-task-list" class="task-list completed-list">
                             <!-- Tasks injected here -->
                         </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Timer View -->
+            <section id="view-timer" class="view">
+                <header class="view-header">
+                    <div>
+                        <h1>タイマー</h1>
+                        <p class="subtitle">学習やタスクの時間を計測して記録します</p>
+                    </div>
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr; max-width: 600px; margin: 0 auto;">
+                    <div class="panel" style="text-align: center; padding: 3rem 2rem;">
+                        <select id="timer-task-select" style="width: 100%; padding: 12px; margin-bottom: 2rem; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 1.1rem;">
+                            <option value="">(タスクを選択してください)</option>
+                        </select>
+                        <div id="timer-display" style="font-size: 5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 3rem; color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow);">00:00:00</div>
+                        <div style="display: flex; gap: 1rem; justify-content: center; max-width: 400px; margin: 0 auto;">
+                            <button id="btn-timer-start" class="btn primary" style="flex: 1; padding: 1rem; font-size: 1.1rem;">▶ 開始</button>
+                            <button id="btn-timer-pause" class="btn secondary" style="flex: 1; padding: 1rem; font-size: 1.1rem; display: none;">⏸ 停止</button>
+                            <button id="btn-timer-finish" class="btn secondary" style="flex: 1; padding: 1rem; font-size: 1.1rem; border-color: var(--success-color); color: var(--success-color);" disabled>✅ 完了</button>
+                        </div>
                     </div>
                 </div>
             </section>
