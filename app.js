@@ -1254,15 +1254,14 @@ function renderWeeklySchedule() {
     const HEADER_H = 60;  // header area height in px
     const TASKS_H  = 120; // tasks area height in px
 
-    // Time column
+    // Time column — layout spacer only (no labels here)
     const timeCol = document.createElement('div');
     timeCol.className = 'weekly-time-column';
-    timeCol.innerHTML = `<div class="weekly-header" style="height:${HEADER_H}px; border-bottom: none;"></div><div id="time-col-spacer" style="height:${TASKS_H}px; border-bottom: 1px solid var(--panel-border);"></div><div class="weekly-timeline" style="border-right: 1px solid var(--panel-border); background: transparent;">`;
-    for (let h = 5; h <= 28; h++) {
-        let displayH = h % 24;
-        timeCol.innerHTML += `<div class="time-slot-label" style="top: ${(h - 5) * 60}px;">${displayH}:00</div>`;
-    }
-    timeCol.innerHTML += '</div>';
+    timeCol.innerHTML = `
+        <div class="weekly-header" style="height:${HEADER_H}px; box-sizing:border-box; border-bottom:none;"></div>
+        <div style="height:${TASKS_H}px; box-sizing:border-box; border-bottom: 1px solid var(--panel-border);"></div>
+        <div class="weekly-timeline" style="background:transparent; border-right:1px solid var(--panel-border);"></div>
+    `;
     grid.appendChild(timeCol);
 
     const todayStr = getTodayString();
@@ -1364,24 +1363,29 @@ function renderWeeklySchedule() {
         grid.appendChild(col);
     }
 
-    // After rendering, directly measure Y positions of both timelines and correct any offset.
-    // This guarantees time labels align with schedule blocks regardless of CSS.
-    requestAnimationFrame(() => {
-        const timeColTimeline = document.querySelector('.weekly-time-column .weekly-timeline');
-        const dataColTimeline = document.querySelector('.weekly-column .weekly-timeline');
-        const spacer = document.getElementById('time-col-spacer');
-        if (timeColTimeline && dataColTimeline && spacer) {
-            const diff = Math.round(
-                dataColTimeline.getBoundingClientRect().top -
-                timeColTimeline.getBoundingClientRect().top
-            );
-            console.log('[Layout Debug] timeline offset diff:', diff, 'px');
-            if (diff !== 0) {
-                // Shift the time column spacer so both timelines start at the same Y
-                spacer.style.height = (spacer.offsetHeight + diff) + 'px';
-            }
-        }
-    });
+    // ---------------------------------------------------------------
+    // Add time labels as an ABSOLUTE overlay on the grid.
+    // Both the labels and the blocks share the same grid coordinate
+    // system, so they are guaranteed to align regardless of CSS/scroll.
+    // ---------------------------------------------------------------
+    grid.style.position = 'relative';
+    const labelOverlay = document.createElement('div');
+    labelOverlay.style.cssText = [
+        'position:absolute', 'left:0', 'top:0',
+        'width:50px', 'pointer-events:none', 'z-index:10'
+    ].join(';');
+
+    // Labels start at the same Y offset where the timelines start within each column
+    const timelineOffset = HEADER_H + TASKS_H;
+    for (let h = 5; h <= 28; h++) {
+        const displayH = h % 24;
+        const lbl = document.createElement('div');
+        lbl.className = 'time-slot-label';
+        lbl.style.top = (timelineOffset + (h - 5) * 60) + 'px';
+        lbl.textContent = `${displayH}:00`;
+        labelOverlay.appendChild(lbl);
+    }
+    grid.appendChild(labelOverlay);
 }
 
 // Start
