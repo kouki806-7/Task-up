@@ -815,58 +815,17 @@ async function fetchGoogleCalendarEvents() {
         events.forEach(event => {
             if (!event.start.dateTime) return; // skip all-day events
 
-            const rawStart = event.start.dateTime; // e.g. "2026-05-01T09:00:00+09:00"
-            const rawEnd = event.end.dateTime;
+            const rawStart = event.start.dateTime;
+            const rawEnd   = event.end.dateTime;
 
-            // Parse date/time directly from the ISO string without relying on JS Date (avoids TZ shifts)
-            function parseLocalISO(isoStr) {
-                // Extract local time directly from the string's local part
-                // Handles both "+09:00" and "Z" (UTC) suffixes
-                const match = isoStr.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-                if (!match) return { date: '', time: '' };
+            // Google Calendar returns dateTime as RFC3339 e.g. "2026-05-01T09:00:00+09:00"
+            // The characters at positions 0-9 = date, 11-15 = local time.
+            // Read them directly - no Date() conversion needed - avoids all TZ shift bugs.
+            const dateStr  = rawStart.substring(0, 10);  // "2026-05-01"
+            const startStr = rawStart.substring(11, 16); // "09:00"
+            const endStr   = rawEnd.substring(11, 16);   // "10:00"
 
-                // If the string has a UTC offset, apply it to get JST
-                const offsetMatch = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
-                let hours = parseInt(match[2].split(':')[0]);
-                let mins = parseInt(match[2].split(':')[1]);
-                let date = match[1];
-
-                if (offsetMatch) {
-                    const sign = offsetMatch[1] === '+' ? 1 : -1;
-                    const offsetH = parseInt(offsetMatch[2]);
-                    const offsetM = parseInt(offsetMatch[3]);
-                    // Convert to UTC first (subtract offset), then to JST (+9)
-                    let totalMins = hours * 60 + mins - sign * (offsetH * 60 + offsetM) + 9 * 60;
-                    if (totalMins < 0) { totalMins += 24 * 60; date = adjustDate(date, -1); }
-                    if (totalMins >= 24 * 60) { totalMins -= 24 * 60; date = adjustDate(date, 1); }
-                    hours = Math.floor(totalMins / 60);
-                    mins = totalMins % 60;
-                } else if (isoStr.endsWith('Z')) {
-                    // UTC → JST (+9h)
-                    let totalMins = hours * 60 + mins + 9 * 60;
-                    if (totalMins >= 24 * 60) { totalMins -= 24 * 60; date = adjustDate(date, 1); }
-                    hours = Math.floor(totalMins / 60);
-                    mins = totalMins % 60;
-                }
-                // If offset is already +09:00 (JST), the local time IS the correct time - no conversion needed
-
-                const timeStr = `${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}`;
-                return { date, time: timeStr };
-            }
-
-            function adjustDate(dateStr, days) {
-                const d = new Date(dateStr + 'T00:00:00Z');
-                d.setUTCDate(d.getUTCDate() + days);
-                return d.toISOString().substring(0, 10);
-            }
-
-            const startParsed = parseLocalISO(rawStart);
-            const endParsed = parseLocalISO(rawEnd);
-            const dateStr = startParsed.date;
-            const startStr = startParsed.time;
-            const endStr = endParsed.time;
-
-            console.log('[GCal Debug]', rawStart, '->', startStr, dateStr);
+            console.log('[GCal Debug] raw:', rawStart, '\u2192 saved as', dateStr, startStr, '-', endStr);
             
             const gcalId = event.id;
             const title = event.summary || '予定';
@@ -1294,7 +1253,7 @@ function renderWeeklySchedule() {
     // Time column
     const timeCol = document.createElement('div');
     timeCol.className = 'weekly-time-column';
-    timeCol.innerHTML = '<div class="weekly-header" style="height:65px; border-bottom: none;"></div><div style="height:120px; border-bottom: 1px solid var(--panel-border);"></div><div class="weekly-timeline" style="border-right: 1px solid var(--panel-border); background: transparent;">';
+    timeCol.innerHTML = '<div class="weekly-header" style="height:65px; border-bottom: none;"></div><div id="time-col-spacer" style="height:120px; border-bottom: 1px solid var(--panel-border);"></div><div class="weekly-timeline" style="border-right: 1px solid var(--panel-border); background: transparent;">';
     for (let h = 5; h <= 28; h++) {
         let displayH = h % 24;
         timeCol.innerHTML += `<div class="time-slot-label" style="top: ${(h - 5) * 60}px;">${displayH}:00</div>`;
@@ -1392,6 +1351,16 @@ function renderWeeklySchedule() {
         col.appendChild(timelineDiv);
         grid.appendChild(col);
     }
+
+    // Dynamically align time-column spacer height with actual tasks section height
+    // This ensures the time labels are perfectly in sync with the schedule blocks
+    requestAnimationFrame(() => {
+        const firstTasksEl = grid.querySelector('.weekly-column .weekly-tasks');
+        const spacer = document.getElementById('time-col-spacer');
+        if (firstTasksEl && spacer) {
+            spacer.style.height = firstTasksEl.offsetHeight + 'px';
+        }
+    });
 }
 
 // Start
