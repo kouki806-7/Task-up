@@ -62,7 +62,10 @@
             <section id="view-dashboard" class="view active">
                 <header class="view-header">
                     <div>
-                        <h1 id="current-date-display">今日</h1>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <h1 id="current-date-display" style="margin: 0;">今日</h1>
+                            <span id="weather-display" style="font-size: 1.8rem;" title="天気情報を取得中..."></span>
+                        </div>
                         <p class="subtitle" id="progress-text">さあ、始めましょう。</p>
                     </div>
                     <div class="progress-ring-container">

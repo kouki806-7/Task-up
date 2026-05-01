@@ -314,6 +314,46 @@ async function saveToCloud() {
     }
 }
 
+// --- Weather Fetch ---
+async function fetchWeather() {
+    const weatherDisplay = document.getElementById('weather-display');
+    if (!weatherDisplay) return;
+
+    // Use Tokyo coordinates by default
+    const lat = 35.6895;
+    const lon = 139.6917;
+
+    try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=Asia%2FTokyo`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Network response was not ok');
+        const data = await response.json();
+        
+        const code = data.current_weather.weathercode;
+        
+        let icon = '🌤️'; // default
+        let desc = '不明';
+
+        // WMO Weather interpretation codes (https://open-meteo.com/en/docs)
+        if (code === 0) { icon = '☀️'; desc = '快晴'; }
+        else if (code === 1 || code === 2 || code === 3) { icon = '⛅'; desc = '晴れ/曇り'; }
+        else if (code === 45 || code === 48) { icon = '🌫️'; desc = '霧'; }
+        else if (code >= 51 && code <= 55) { icon = '🌧️'; desc = '霧雨'; }
+        else if (code >= 61 && code <= 65) { icon = '☔'; desc = '雨'; }
+        else if (code >= 71 && code <= 75) { icon = '⛄'; desc = '雪'; }
+        else if (code >= 80 && code <= 82) { icon = '🌦️'; desc = 'にわか雨'; }
+        else if (code >= 85 && code <= 86) { icon = '🌨️'; desc = '雪'; }
+        else if (code >= 95) { icon = '⛈️'; desc = '雷雨'; }
+
+        weatherDisplay.textContent = icon;
+        weatherDisplay.title = `${desc} (${data.current_weather.temperature}℃)`;
+    } catch (e) {
+        console.error("Weather fetch failed:", e);
+        weatherDisplay.textContent = '☁️';
+        weatherDisplay.title = '天気情報が取得できませんでした';
+    }
+}
+
 // --- Initialization ---
 function init() {
     loadData();
@@ -332,6 +372,7 @@ function init() {
     
     renderDashboard();
     renderHistoryCalendar();
+    fetchWeather();
     
     // Delay slightly to ensure external scripts are loaded
     setTimeout(() => {
@@ -643,9 +684,9 @@ function setupEventListeners() {
                         memo: `タイマー記録: ${formatTimer(timerSeconds)}`
                     });
                     
-                    const dateStr = getTodayString();
-                    if (!state.history[dateStr]) state.history[dateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
-                    state.history[dateStr].tasksCompleted++;
+                    const historyDateStr = getTodayString();
+                    if (!state.history[historyDateStr]) state.history[historyDateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
+                    state.history[historyDateStr].tasksCompleted++;
                 }
             }
             
