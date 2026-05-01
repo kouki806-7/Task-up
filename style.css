@@ -724,6 +724,8 @@ textarea {
     background: var(--panel-bg);
     backdrop-filter: blur(8px);
     z-index: 10;
+    height: 65px;
+    box-sizing: border-box;
 }
 
 .weekly-header.today {
@@ -744,7 +746,17 @@ textarea {
     padding: 8px;
     border-bottom: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.02);
-    min-height: 60px;
+    height: 120px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.weekly-tasks::-webkit-scrollbar {
+    width: 4px;
+}
+.weekly-tasks::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
 }
 
 .weekly-task-item {
