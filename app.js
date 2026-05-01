@@ -800,6 +800,7 @@ async function fetchGoogleCalendarEvents() {
             'showDeleted': false,
             'singleEvents': true,
             'orderBy': 'startTime',
+            'timeZone': 'Asia/Tokyo'
         });
         
         const events = response.result.items;
@@ -817,9 +818,11 @@ async function fetchGoogleCalendarEvents() {
             const startDate = new Date(event.start.dateTime);
             const endDate = new Date(event.end.dateTime);
             
-            const dateStr = startDate.toLocaleDateString('en-CA');
-            const startStr = startDate.toTimeString().substring(0, 5);
-            const endStr = endDate.toTimeString().substring(0, 5);
+            // Force output in Asia/Tokyo to prevent browser timezone shifts
+            const formatOpts = { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false };
+            const dateStr = startDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Tokyo' }); // YYYY-MM-DD
+            const startStr = startDate.toLocaleTimeString('en-GB', formatOpts); // HH:MM
+            const endStr = endDate.toLocaleTimeString('en-GB', formatOpts); // HH:MM
             
             const gcalId = event.id;
             const title = event.summary || '予定';
