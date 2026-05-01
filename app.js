@@ -771,6 +771,20 @@ function deleteTask(id) {
     saveData();
 }
 
+function addSchedule(title, date, startTime, endTime, tag, memo, gcalId = null) {
+    state.schedules.push({
+        id: generateId(),
+        gcalId,
+        title,
+        date,
+        startTime,
+        endTime,
+        tag,
+        memo
+    });
+    // saveData will be called by the caller
+}
+
 async function fetchGoogleCalendarEvents() {
     try {
         const start = new Date(currentWeekStart);
