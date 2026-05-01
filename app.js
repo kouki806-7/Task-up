@@ -811,6 +811,8 @@ async function fetchGoogleCalendarEvents() {
 
         let added = 0;
         let updated = 0;
+        let taskAdded = 0;
+        let taskUpdated = 0;
 
         events.forEach(event => {
             if (!event.start.dateTime) return; // skip all-day events
@@ -818,19 +820,17 @@ async function fetchGoogleCalendarEvents() {
             const rawStart = event.start.dateTime;
             const rawEnd   = event.end.dateTime;
 
-            // Google Calendar returns dateTime as RFC3339 e.g. "2026-05-01T09:00:00+09:00"
-            // The characters at positions 0-9 = date, 11-15 = local time.
-            // Read them directly - no Date() conversion needed - avoids all TZ shift bugs.
-            const dateStr  = rawStart.substring(0, 10);  // "2026-05-01"
-            const startStr = rawStart.substring(11, 16); // "09:00"
-            const endStr   = rawEnd.substring(11, 16);   // "10:00"
+            const dateStr  = rawStart.substring(0, 10);
+            const startStr = rawStart.substring(11, 16);
+            const endStr   = rawEnd.substring(11, 16);
 
             console.log('[GCal Debug] raw:', rawStart, '\u2192 saved as', dateStr, startStr, '-', endStr);
-            
+
             const gcalId = event.id;
             const title = event.summary || '予定';
             const memo = event.description || '';
 
+            // --- Schedule registration ---
             const existingIdx = state.schedules.findIndex(s => s.gcalId === gcalId);
             if (existingIdx !== -1) {
                 state.schedules[existingIdx].title = title;
@@ -843,13 +843,41 @@ async function fetchGoogleCalendarEvents() {
                 addSchedule(title, dateStr, startStr, endStr, 'カレンダー', memo, gcalId);
                 added++;
             }
+
+            // --- Task registration for manaba events (enables timer use) ---
+            if (title.toLowerCase().includes('manaba')) {
+                const [sh, sm] = startStr.split(':').map(Number);
+                const [eh, em] = endStr.split(':').map(Number);
+                const durationMin = (eh * 60 + em) - (sh * 60 + sm);
+
+                const existingTask = state.tasks.find(t => t.gcalId === gcalId);
+                if (existingTask) {
+                    existingTask.text = title;
+                    existingTask.date = dateStr;
+                    existingTask.duration = durationMin;
+                    taskUpdated++;
+                } else {
+                    state.tasks.push({
+                        id: generateId(),
+                        gcalId,
+                        text: title,
+                        duration: durationMin,
+                        tag: '勉強・課題',
+                        date: dateStr,
+                        completed: false,
+                        isRoutine: false
+                    });
+                    taskAdded++;
+                }
+            }
         });
 
         saveData();
         if (document.getElementById('view-schedule').classList.contains('active')) {
             renderWeeklySchedule();
         }
-        alert(`Googleカレンダーと同期しました！\n（新規: ${added}件, 更新: ${updated}件）`);
+        const taskMsg = taskAdded > 0 ? `\nタスク自動登録(manaba): ${taskAdded}件` : '';
+        alert(`Googleカレンダーと同期しました！\n（新規: ${added}件, 更新: ${updated}件）${taskMsg}`);
         
     } catch (err) {
         console.error(err);
