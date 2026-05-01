@@ -1250,10 +1250,14 @@ function renderWeeklySchedule() {
     document.getElementById('schedule-week-display').textContent = 
         `${currentWeekStart.getFullYear()}年 ${currentWeekStart.getMonth()+1}月${currentWeekStart.getDate()}日 〜 ${endOfWeek.getMonth()+1}月${endOfWeek.getDate()}日`;
 
+    // Fixed height constants for alignment (JS controls height, not CSS)
+    const HEADER_H = 60;  // header area height in px
+    const TASKS_H  = 120; // tasks area height in px
+
     // Time column
     const timeCol = document.createElement('div');
     timeCol.className = 'weekly-time-column';
-    timeCol.innerHTML = '<div class="weekly-header" style="height:65px; border-bottom: none;"></div><div id="time-col-spacer" style="height:120px; border-bottom: 1px solid var(--panel-border);"></div><div class="weekly-timeline" style="border-right: 1px solid var(--panel-border); background: transparent;">';
+    timeCol.innerHTML = `<div class="weekly-header" style="height:${HEADER_H}px; border-bottom: none;"></div><div id="time-col-spacer" style="height:${TASKS_H}px; border-bottom: 1px solid var(--panel-border);"></div><div class="weekly-timeline" style="border-right: 1px solid var(--panel-border); background: transparent;">`;
     for (let h = 5; h <= 28; h++) {
         let displayH = h % 24;
         timeCol.innerHTML += `<div class="time-slot-label" style="top: ${(h - 5) * 60}px;">${displayH}:00</div>`;
@@ -1279,9 +1283,12 @@ function renderWeeklySchedule() {
         header.innerHTML = `<div class="weekly-day">${days[i]}</div><div class="weekly-date">${currentDate.getDate()}</div>`;
         col.appendChild(header);
 
-        // Tasks container
+        // Tasks container — height is set via JS to match time-col-spacer exactly
         const tasksDiv = document.createElement('div');
         tasksDiv.className = 'weekly-tasks';
+        tasksDiv.style.height = TASKS_H + 'px';
+        tasksDiv.style.overflowY = 'auto';
+        tasksDiv.style.boxSizing = 'border-box';
         
         const dayTasks = state.tasks.filter(t => t.date === dateStr);
         dayTasks.forEach(task => {
@@ -1293,6 +1300,11 @@ function renderWeeklySchedule() {
             `;
             tasksDiv.appendChild(tDiv);
         });
+
+        // Header height also controlled by JS for precise alignment
+        header.style.height = HEADER_H + 'px';
+        header.style.boxSizing = 'border-box';
+
         col.appendChild(tasksDiv);
 
         // Timeline container
@@ -1351,16 +1363,6 @@ function renderWeeklySchedule() {
         col.appendChild(timelineDiv);
         grid.appendChild(col);
     }
-
-    // Dynamically align time-column spacer height with actual tasks section height
-    // This ensures the time labels are perfectly in sync with the schedule blocks
-    requestAnimationFrame(() => {
-        const firstTasksEl = grid.querySelector('.weekly-column .weekly-tasks');
-        const spacer = document.getElementById('time-col-spacer');
-        if (firstTasksEl && spacer) {
-            spacer.style.height = firstTasksEl.offsetHeight + 'px';
-        }
-    });
 }
 
 // Start
