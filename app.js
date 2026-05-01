@@ -374,10 +374,12 @@ function init() {
     renderHistoryCalendar();
     fetchWeather();
     
-    // Delay slightly to ensure external scripts are loaded
+    // Delay slightly to ensure external scripts are loaded, then attempt auto-sync
     setTimeout(() => {
         initGAPI();
         initFirebase();
+        // After GAPI has had time to initialize, attempt background sync
+        setTimeout(autoSyncGoogleCalendar, 3000);
     }, 1000);
 }
 
@@ -785,7 +787,7 @@ function addSchedule(title, date, startTime, endTime, tag, memo, gcalId = null) 
     // saveData will be called by the caller
 }
 
-async function fetchGoogleCalendarEvents() {
+async function fetchGoogleCalendarEvents(silent = false) {
     try {
         const start = new Date(currentWeekStart);
         start.setHours(0,0,0,0);
@@ -805,7 +807,7 @@ async function fetchGoogleCalendarEvents() {
         
         const events = response.result.items;
         if (!events || events.length === 0) {
-            alert('今週の予定は見つかりませんでした。');
+            if (!silent) alert('今週の予定は見つかりませんでした。');
             return;
         }
 
@@ -876,12 +878,45 @@ async function fetchGoogleCalendarEvents() {
         if (document.getElementById('view-schedule').classList.contains('active')) {
             renderWeeklySchedule();
         }
+
+        // Update last-sync time display
+        const now = new Date();
+        const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+        const gcalSyncEl = document.getElementById('gcal-last-sync');
+        if (gcalSyncEl) gcalSyncEl.textContent = `GCal 最終同期: ${timeStr}`;
+
         const taskMsg = taskAdded > 0 ? `\nタスク自動登録(manaba): ${taskAdded}件` : '';
-        alert(`Googleカレンダーと同期しました！\n（新規: ${added}件, 更新: ${updated}件）${taskMsg}`);
+        alert(`Googleカレンダーと自動同期しました！\n（新規: ${added}件, 更新: ${updated}件）${taskMsg}`);
+        console.log(`[Auto-sync] done. added=${added}, updated=${updated}, taskAdded=${taskAdded}`);
         
     } catch (err) {
         console.error(err);
-        alert('同期に失敗しました: ' + (err.message || '不明なエラー'));
+        if (!silent) {
+            alert('同期に失敗しました: ' + (err.message || '不明なエラー'));
+        } else {
+            console.log('[Auto-sync] failed silently:', err.message);
+        }
+    }
+}
+
+// --- Auto Sync ---
+// Attempts a silent token refresh and syncs Google Calendar in the background.
+// Works when the user has previously granted consent and the session is still alive.
+function autoSyncGoogleCalendar() {
+    if (!gapiInited || !gisInited) return;
+
+    authCallback = () => fetchGoogleCalendarEvents(true);
+
+    try {
+        if (gapi.client.getToken() !== null) {
+            // Token already in memory — sync immediately
+            fetchGoogleCalendarEvents(true);
+        } else {
+            // Try silent OAuth (no consent dialog; skips if not previously authorized)
+            tokenClient.requestAccessToken({ prompt: '' });
+        }
+    } catch (e) {
+        console.log('[Auto-sync] silent auth skipped:', e.message);
     }
 }
 

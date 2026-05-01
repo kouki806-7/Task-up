@@ -165,11 +165,12 @@
                         <h1 id="schedule-week-display">今週</h1>
                         <p class="subtitle">スケジュールとタスクの確認・登録</p>
                     </div>
-                    <div class="calendar-controls" style="display: flex; align-items: center;">
-                        <button id="btn-sync-gcal" class="btn secondary" style="margin-right: 1rem; border-color: rgba(255,255,255,0.2);">
+                    <div class="calendar-controls" style="display: flex; align-items: center; gap: 8px;">
+                        <button id="btn-sync-gcal" class="btn secondary" style="border-color: rgba(255,255,255,0.2);">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
                             Google同期
                         </button>
+                        <span id="gcal-last-sync" style="font-size:0.75rem; color:var(--text-secondary); white-space:nowrap;"></span>
                         <button id="prev-week" class="icon-btn">&larr;</button>
                         <button id="next-week" class="icon-btn">&rarr;</button>
                     </div>
@@ -407,6 +408,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=20"></script>
 </body>
 </html>
