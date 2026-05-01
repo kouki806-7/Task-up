@@ -1363,6 +1363,25 @@ function renderWeeklySchedule() {
         col.appendChild(timelineDiv);
         grid.appendChild(col);
     }
+
+    // After rendering, directly measure Y positions of both timelines and correct any offset.
+    // This guarantees time labels align with schedule blocks regardless of CSS.
+    requestAnimationFrame(() => {
+        const timeColTimeline = document.querySelector('.weekly-time-column .weekly-timeline');
+        const dataColTimeline = document.querySelector('.weekly-column .weekly-timeline');
+        const spacer = document.getElementById('time-col-spacer');
+        if (timeColTimeline && dataColTimeline && spacer) {
+            const diff = Math.round(
+                dataColTimeline.getBoundingClientRect().top -
+                timeColTimeline.getBoundingClientRect().top
+            );
+            console.log('[Layout Debug] timeline offset diff:', diff, 'px');
+            if (diff !== 0) {
+                // Shift the time column spacer so both timelines start at the same Y
+                spacer.style.height = (spacer.offsetHeight + diff) + 'px';
+            }
+        }
+    });
 }
 
 // Start
