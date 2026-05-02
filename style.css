@@ -750,15 +750,19 @@ textarea {
 /* Weekly Schedule Calendar */
 .weekly-grid {
     display: flex;
-    min-width: 900px;
+    width: 100%;
+    min-width: 0;
     height: 700px;
+    overflow-x: auto;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     border-top: 1px solid var(--panel-border);
     position: relative;
 }
 
 .mobile-layout .weekly-grid {
-    min-width: 100%;
+    width: 100%;
+    min-width: 0;
 }
 
 .weekly-time-column {
