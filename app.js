@@ -311,21 +311,25 @@ function syncTimerUI() {
     if (state.timer.isRunning) {
         timerSelect.value = state.timer.taskId;
         timerSelect.disabled = true;
-        btnTimerStart.style.display = 'none';
-        btnTimerPause.style.display = 'block';
+        btnTimerStart.innerHTML = '⏸ 一時停止';
+        btnTimerStart.classList.replace('primary', 'secondary');
+        btnTimerPause.style.display = 'none'; // We'll hide the old pause button
         btnTimerFinish.disabled = false;
         btnTimerCancel.style.display = 'block';
         runTimerInterval();
     } else if (state.timer.accumulatedSeconds > 0) {
         timerSelect.value = state.timer.taskId;
         timerSelect.disabled = true;
-        btnTimerStart.style.display = 'block';
-        btnTimerStart.textContent = '▶ 再開';
+        btnTimerStart.innerHTML = '▶ 再開';
+        btnTimerStart.classList.replace('secondary', 'primary');
         btnTimerPause.style.display = 'none';
         btnTimerFinish.disabled = false;
         btnTimerCancel.style.display = 'block';
         updateTimerDisplay();
     } else {
+        btnTimerStart.innerHTML = '▶ 開始';
+        btnTimerStart.classList.replace('secondary', 'primary');
+        btnTimerPause.style.display = 'none';
         btnTimerCancel.style.display = 'none';
         updateTimerDisplay();
     }
@@ -745,21 +749,9 @@ function setupEventListeners() {
             const taskId = timerSelect.value;
             if (!taskId) return alert("タスクを選択してください");
             
-            if (!state.timer.isRunning) {
-                state.timer.isRunning = true;
-                state.timer.taskId = taskId;
-                state.timer.startTime = Date.now();
-                saveData();
-                
-                btnTimerCancel.style.display = 'block';
-                runTimerInterval();
-            }
-        });
-    }
-    
-    if (btnTimerPause) {
-        btnTimerPause.addEventListener('click', () => {
+            // Toggle Logic
             if (state.timer.isRunning) {
+                // Pause action
                 const elapsed = Math.floor((Date.now() - state.timer.startTime) / 1000);
                 state.timer.accumulatedSeconds += elapsed;
                 state.timer.isRunning = false;
@@ -769,11 +761,27 @@ function setupEventListeners() {
                 if (timerInterval) clearInterval(timerInterval);
                 timerInterval = null;
                 
-                btnTimerPause.style.display = 'none';
-                btnTimerStart.style.display = 'block';
-                btnTimerStart.textContent = '▶ 再開';
+                syncTimerUI();
+            } else {
+                // Start/Resume action
+                // If the task has changed, reset the accumulated time to avoid lingering bugs
+                if (state.timer.taskId !== taskId) {
+                    state.timer.accumulatedSeconds = 0;
+                    state.timer.taskId = taskId;
+                }
+                
+                state.timer.isRunning = true;
+                state.timer.startTime = Date.now();
+                saveData();
+                
+                syncTimerUI();
             }
         });
+    }
+    
+    // We can keep btnTimerPause for backward compatibility or just ignore it
+    if (btnTimerPause) {
+        btnTimerPause.style.display = 'none';
     }
     
     if (btnTimerFinish) {

@@ -150,11 +150,11 @@
                         </select>
                         <div id="timer-display" style="font-size: 5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 3rem; color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow);">00:00:00</div>
                         <div style="display: flex; gap: 0.75rem; justify-content: center; max-width: 500px; margin: 0 auto; flex-wrap: wrap;">
-                            <button id="btn-timer-start" class="btn primary" style="flex: 2; padding: 1rem; font-size: 1.1rem; min-width: 120px;">▶ 開始</button>
-                            <button id="btn-timer-pause" class="btn secondary" style="flex: 2; padding: 1rem; font-size: 1.1rem; display: none; min-width: 120px;">⏸ 一時停止</button>
+                            <button id="btn-timer-start" class="btn primary" style="flex: 3; padding: 1rem; font-size: 1.1rem; min-width: 150px;">▶ 開始</button>
                             <button id="btn-timer-finish" class="btn secondary" style="flex: 2; padding: 1rem; font-size: 1.1rem; border-color: var(--success-color); color: var(--success-color); min-width: 120px;" disabled>✅ 完了</button>
                             <button id="btn-timer-cancel" class="btn secondary" style="flex: 1; padding: 1rem; font-size: 1.1rem; border-color: var(--danger-color); color: var(--danger-color); display: none; min-width: 100px;">✖ 中止</button>
                         </div>
+                        <div id="btn-timer-pause" style="display:none;"></div> <!-- Legacy hidden element for JS compatibility -->
                     </div>
                 </div>
             </section>
@@ -429,6 +429,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=28"></script>
 </body>
 </html>
