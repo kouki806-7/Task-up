@@ -17,6 +17,12 @@ let state = {
         clientId: '402677092902-bceev6me91ekc1so00g2h96doqd1ripr.apps.googleusercontent.com',
         firebaseConfig: null,
         layoutMode: 'auto'
+    },
+    timer: {
+        taskId: null,
+        startTime: null, // timestamp
+        isRunning: false,
+        accumulatedSeconds: 0
     }
 };
 
@@ -43,6 +49,9 @@ function loadData() {
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
+        if (!state.timer) {
+            state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
+        }
     }
     
     // Check for new day
@@ -132,6 +141,13 @@ const btnNextWeek = document.getElementById('next-week');
 const formSchedule = document.getElementById('add-schedule-form');
 let currentWeekStart = new Date(); // Represents the currently selected date in schedule view
 
+// Timer Elements
+const btnTimerStart = document.getElementById('btn-timer-start');
+const btnTimerPause = document.getElementById('btn-timer-pause');
+const btnTimerFinish = document.getElementById('btn-timer-finish');
+const timerDisplay = document.getElementById('timer-display');
+const timerSelect = document.getElementById('timer-task-select');
+
 function getMonday(d) {
   d = new Date(d);
   var day = d.getDay(),
@@ -175,11 +191,8 @@ function initGAPI() {
     }
 }
 
-// --- Timer State ---
+// --- Timer Logic ---
 let timerInterval = null;
-let timerSeconds = 0;
-let timerTaskId = null;
-let timerStartTime = null;
 
 function formatTimer(seconds) {
     const h = Math.floor(seconds / 3600);
@@ -189,22 +202,62 @@ function formatTimer(seconds) {
 }
 
 function updateTimerSelect() {
-    const select = document.getElementById('timer-task-select');
-    if (!select) return;
+    if (!timerSelect) return;
     
-    const val = select.value;
-    select.innerHTML = '<option value="">(タスクを選択してください)</option>';
+    const val = timerSelect.value;
+    timerSelect.innerHTML = '<option value="">(タスクを選択してください)</option>';
     
     const activeTasks = state.tasks.filter(t => !t.completed && t.date === getTodayString());
     activeTasks.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
         opt.textContent = t.text;
-        select.appendChild(opt);
+        timerSelect.appendChild(opt);
     });
     
     if (activeTasks.find(t => t.id === val)) {
-        select.value = val;
+        timerSelect.value = val;
+    }
+}
+
+function updateTimerDisplay() {
+    if (!state.timer || !timerDisplay) return;
+    
+    let totalSeconds = state.timer.accumulatedSeconds;
+    if (state.timer.isRunning && state.timer.startTime) {
+        const elapsed = Math.floor((Date.now() - state.timer.startTime) / 1000);
+        totalSeconds += elapsed;
+    }
+    
+    timerDisplay.textContent = formatTimer(totalSeconds);
+}
+
+function runTimerInterval() {
+    if (timerInterval) clearInterval(timerInterval);
+    updateTimerDisplay();
+    timerInterval = setInterval(updateTimerDisplay, 1000);
+}
+
+function syncTimerUI() {
+    if (!state.timer) return;
+    
+    if (state.timer.isRunning) {
+        timerSelect.value = state.timer.taskId;
+        timerSelect.disabled = true;
+        btnTimerStart.style.display = 'none';
+        btnTimerPause.style.display = 'block';
+        btnTimerFinish.disabled = false;
+        runTimerInterval();
+    } else if (state.timer.accumulatedSeconds > 0) {
+        timerSelect.value = state.timer.taskId;
+        timerSelect.disabled = true;
+        btnTimerStart.style.display = 'block';
+        btnTimerStart.textContent = '▶ 再開';
+        btnTimerPause.style.display = 'none';
+        btnTimerFinish.disabled = false;
+        updateTimerDisplay();
+    } else {
+        updateTimerDisplay();
     }
 }
 
@@ -376,6 +429,7 @@ function init() {
     renderDashboard();
     renderHistoryCalendar();
     fetchWeather();
+    syncTimerUI();
     
     // Delay slightly to ensure external scripts are loaded, then attempt auto-sync
     setTimeout(() => {
@@ -613,43 +667,34 @@ function setupEventListeners() {
     }
 
     // Timer Handlers
-    const btnTimerStart = document.getElementById('btn-timer-start');
-    const btnTimerPause = document.getElementById('btn-timer-pause');
-    const btnTimerFinish = document.getElementById('btn-timer-finish');
-    const timerDisplay = document.getElementById('timer-display');
-    const timerSelect = document.getElementById('timer-task-select');
-    
     if (btnTimerStart) {
         btnTimerStart.addEventListener('click', () => {
             const taskId = timerSelect.value;
-            if (!taskId) {
-                alert("タスクを選択してください");
-                return;
-            }
+            if (!taskId) return alert("タスクを選択してください");
             
-            if (!timerInterval) {
-                if (timerSeconds === 0) {
-                    timerStartTime = new Date();
-                    timerTaskId = taskId;
-                }
-                timerInterval = setInterval(() => {
-                    timerSeconds++;
-                    timerDisplay.textContent = formatTimer(timerSeconds);
-                }, 1000);
+            if (!state.timer.isRunning) {
+                state.timer.isRunning = true;
+                state.timer.taskId = taskId;
+                state.timer.startTime = Date.now();
+                saveData();
                 
-                timerSelect.disabled = true;
-                btnTimerStart.style.display = 'none';
-                btnTimerPause.style.display = 'block';
-                btnTimerFinish.disabled = false;
+                runTimerInterval();
             }
         });
     }
     
     if (btnTimerPause) {
         btnTimerPause.addEventListener('click', () => {
-            if (timerInterval) {
-                clearInterval(timerInterval);
+            if (state.timer.isRunning) {
+                const elapsed = Math.floor((Date.now() - state.timer.startTime) / 1000);
+                state.timer.accumulatedSeconds += elapsed;
+                state.timer.isRunning = false;
+                state.timer.startTime = null;
+                saveData();
+                
+                if (timerInterval) clearInterval(timerInterval);
                 timerInterval = null;
+                
                 btnTimerPause.style.display = 'none';
                 btnTimerStart.style.display = 'block';
                 btnTimerStart.textContent = '▶ 再開';
@@ -659,19 +704,26 @@ function setupEventListeners() {
     
     if (btnTimerFinish) {
         btnTimerFinish.addEventListener('click', () => {
+            const now = Date.now();
+            let totalSeconds = state.timer.accumulatedSeconds;
+            if (state.timer.isRunning && state.timer.startTime) {
+                totalSeconds += Math.floor((now - state.timer.startTime) / 1000);
+            }
+
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = null;
             
-            if (timerSeconds < 60) {
+            if (totalSeconds < 60) {
                 alert("1分未満のため、実績として記録されません。");
             } else {
-                const task = state.tasks.find(t => t.id === timerTaskId);
+                const task = state.tasks.find(t => t.id === state.timer.taskId);
                 if (task) {
                     task.completed = true;
                     
-                    const now = new Date();
-                    const startD = timerStartTime;
-                    const endD = now;
+                    // Use a safe reference for startTime or estimate it
+                    const startTs = state.timer.isRunning ? state.timer.startTime : (now - totalSeconds * 1000);
+                    const startD = new Date(startTs);
+                    const endD = new Date(now);
                     
                     const startStr = `${startD.getHours().toString().padStart(2, '0')}:${startD.getMinutes().toString().padStart(2, '0')}`;
                     const endStr = `${endD.getHours().toString().padStart(2, '0')}:${endD.getMinutes().toString().padStart(2, '0')}`;
@@ -690,7 +742,7 @@ function setupEventListeners() {
                         startTime: startStr,
                         endTime: endStr,
                         tag: 'record',
-                        memo: `タイマー記録: ${formatTimer(timerSeconds)}`
+                        memo: `タイマー記録: ${formatTimer(totalSeconds)}`
                     });
                     
                     const historyDateStr = getTodayString();
@@ -699,9 +751,8 @@ function setupEventListeners() {
                 }
             }
             
-            timerSeconds = 0;
-            timerTaskId = null;
-            timerStartTime = null;
+            state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
+            
             timerDisplay.textContent = '00:00:00';
             timerSelect.disabled = false;
             timerSelect.value = '';
