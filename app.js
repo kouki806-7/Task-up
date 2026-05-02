@@ -147,6 +147,7 @@ let currentWeekStart = new Date(); // Represents the currently selected date in 
 const btnTimerStart = document.getElementById('btn-timer-start');
 const btnTimerPause = document.getElementById('btn-timer-pause');
 const btnTimerFinish = document.getElementById('btn-timer-finish');
+const btnTimerCancel = document.getElementById('btn-timer-cancel');
 const timerDisplay = document.getElementById('timer-display');
 const timerSelect = document.getElementById('timer-task-select');
 
@@ -313,6 +314,7 @@ function syncTimerUI() {
         btnTimerStart.style.display = 'none';
         btnTimerPause.style.display = 'block';
         btnTimerFinish.disabled = false;
+        btnTimerCancel.style.display = 'block';
         runTimerInterval();
     } else if (state.timer.accumulatedSeconds > 0) {
         timerSelect.value = state.timer.taskId;
@@ -321,8 +323,10 @@ function syncTimerUI() {
         btnTimerStart.textContent = '▶ 再開';
         btnTimerPause.style.display = 'none';
         btnTimerFinish.disabled = false;
+        btnTimerCancel.style.display = 'block';
         updateTimerDisplay();
     } else {
+        btnTimerCancel.style.display = 'none';
         updateTimerDisplay();
     }
 }
@@ -747,6 +751,7 @@ function setupEventListeners() {
                 state.timer.startTime = Date.now();
                 saveData();
                 
+                btnTimerCancel.style.display = 'block';
                 runTimerInterval();
             }
         });
@@ -831,6 +836,7 @@ function setupEventListeners() {
             btnTimerStart.style.display = 'block';
             btnTimerStart.textContent = '▶ 開始';
             btnTimerFinish.disabled = true;
+            btnTimerCancel.style.display = 'none';
             
             saveData();
             if (document.getElementById('view-schedule').classList.contains('active')) {
@@ -838,6 +844,28 @@ function setupEventListeners() {
             }
             
             showTimerCompletionModal();
+        });
+    }
+
+    if (btnTimerCancel) {
+        btnTimerCancel.addEventListener('click', () => {
+            if (!confirm("タイマーを中止しますか？（記録は残りません）")) return;
+            
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+            
+            state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
+            
+            timerDisplay.textContent = '00:00:00';
+            timerSelect.disabled = false;
+            timerSelect.value = '';
+            btnTimerPause.style.display = 'none';
+            btnTimerStart.style.display = 'block';
+            btnTimerStart.textContent = '▶ 開始';
+            btnTimerFinish.disabled = true;
+            btnTimerCancel.style.display = 'none';
+            
+            saveData();
         });
     }
 
