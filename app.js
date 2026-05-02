@@ -858,16 +858,9 @@ function setupEventListeners() {
             const finishedTaskId = state.timer.taskId;
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
             
-            timerDisplay.textContent = '00:00:00';
-            timerSelect.disabled = false;
-            timerSelect.value = '';
-            btnTimerPause.style.display = 'none';
-            btnTimerStart.style.display = 'block';
-            btnTimerStart.textContent = '▶ 開始';
-            btnTimerFinish.disabled = true;
-            btnTimerCancel.style.display = 'none';
-            
             saveData();
+            syncTimerUI(); // Centralized UI reset
+            
             if (document.getElementById('view-schedule').classList.contains('active')) {
                 renderWeeklySchedule();
             }
