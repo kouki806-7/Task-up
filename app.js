@@ -16,7 +16,8 @@ let state = {
         apiKey: 'AIzaSyDy-UDkVaLk5zLkojM3IOtzPZTwFpCtfSA',
         clientId: '402677092902-bceev6me91ekc1so00g2h96doqd1ripr.apps.googleusercontent.com',
         firebaseConfig: null,
-        layoutMode: 'auto'
+        layoutMode: 'auto',
+        googleEmail: null
     },
     timer: {
         taskId: null,
@@ -46,6 +47,7 @@ function loadData() {
             };
         }
         if (!state.settings.layoutMode) state.settings.layoutMode = 'auto';
+        if (!state.settings.googleEmail) state.settings.googleEmail = null;
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
@@ -156,6 +158,7 @@ function getMonday(d) {
 }
 
 // --- Google API ---
+let isSilentAuthAttempt = false;
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
 const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 let tokenClient;
@@ -181,8 +184,12 @@ function initGAPI() {
             scope: SCOPES,
             callback: (resp) => {
                 if (resp.error !== undefined) {
-                    alert("認証エラー: " + resp.error);
-                    throw resp;
+                    if (!isSilentAuthAttempt) {
+                        alert("認証エラー: " + resp.error);
+                    } else {
+                        console.log("[Auto-sync] silent auth result:", resp.error);
+                    }
+                    return;
                 }
                 if (authCallback) authCallback();
             },
@@ -204,19 +211,34 @@ function formatTimer(seconds) {
 function updateTimerSelect() {
     if (!timerSelect) return;
     
-    const val = timerSelect.value;
+    // Restore selection: current value OR state-stored taskId
+    const valToRestore = timerSelect.value || (state.timer ? state.timer.taskId : "");
+    
     timerSelect.innerHTML = '<option value="">(タスクを選択してください)</option>';
     
-    const activeTasks = state.tasks.filter(t => !t.completed && t.date === getTodayString());
-    activeTasks.forEach(t => {
+    // 1. Get today's incomplete tasks
+    let tasksToShow = state.tasks.filter(t => !t.completed && t.date === getTodayString());
+    
+    // 2. If a timer is active, ensure THAT task is in the list (even if from another day or completed)
+    if (state.timer && state.timer.taskId) {
+        const timedTask = state.tasks.find(t => t.id === state.timer.taskId);
+        if (timedTask && !tasksToShow.find(t => t.id === timedTask.id)) {
+            tasksToShow.push(timedTask);
+        }
+    }
+    
+    tasksToShow.sort((a, b) => a.text.localeCompare(b.text));
+
+    tasksToShow.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        opt.textContent = t.text;
+        const dateNote = t.date !== getTodayString() ? ` [${t.date}]` : "";
+        opt.textContent = t.text + dateNote;
         timerSelect.appendChild(opt);
     });
     
-    if (activeTasks.find(t => t.id === val)) {
-        timerSelect.value = val;
+    if (valToRestore) {
+        timerSelect.value = valToRestore;
     }
 }
 
@@ -583,11 +605,10 @@ function setupEventListeners() {
             }
             authCallback = fetchGoogleCalendarEvents;
             
-            if (gapi.client.getToken() === null) {
-                tokenClient.requestAccessToken({prompt: 'consent'});
-            } else {
-                tokenClient.requestAccessToken({prompt: ''});
-            }
+            // Use prompt: '' instead of 'consent' to skip the consent screen if already authorized.
+            // This still shows the account picker if multiple accounts are present.
+            isSilentAuthAttempt = false;
+            tokenClient.requestAccessToken({ prompt: '' });
         });
     }
 
@@ -748,6 +769,8 @@ function setupEventListeners() {
                     const historyDateStr = getTodayString();
                     if (!state.history[historyDateStr]) state.history[historyDateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
                     state.history[historyDateStr].tasksCompleted++;
+                } else {
+                    console.error("[Timer] Task not found for ID:", state.timer.taskId);
                 }
             }
             
@@ -865,6 +888,15 @@ async function fetchGoogleCalendarEvents(silent = false) {
         });
         
         const events = response.result.items;
+        
+        // Save the calendar email as a login hint for future silent syncs
+        if (response.result.summary && response.result.summary.includes('@')) {
+            if (state.settings.googleEmail !== response.result.summary) {
+                state.settings.googleEmail = response.result.summary;
+                saveData();
+            }
+        }
+
         if (!events || events.length === 0) {
             if (!silent) alert('今週の予定は見つかりませんでした。');
             return;
@@ -968,14 +1000,19 @@ function autoSyncGoogleCalendar() {
 
     try {
         if (gapi.client.getToken() !== null) {
-            // Token already in memory — sync immediately
             fetchGoogleCalendarEvents(true);
         } else {
-            // Try silent OAuth (no consent dialog; skips if not previously authorized)
-            tokenClient.requestAccessToken({ prompt: '' });
+            // Use prompt: 'none' for a completely silent attempt. 
+            // Requires a valid session in the browser.
+            const options = { prompt: 'none' };
+            if (state.settings.googleEmail) {
+                options.login_hint = state.settings.googleEmail;
+            }
+            isSilentAuthAttempt = true;
+            tokenClient.requestAccessToken(options);
         }
     } catch (e) {
-        console.log('[Auto-sync] silent auth skipped:', e.message);
+        console.log('[Auto-sync] silent auth skipped or failed:', e);
     }
 }
 
