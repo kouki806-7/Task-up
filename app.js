@@ -240,16 +240,36 @@ const PRAISES = [
     "集中お疲れ様でした。少し休憩も挟んでくださいね。"
 ];
 
-function showTimerCompletionModal() {
+function showTimerCompletionModal(taskName) {
     const modal = document.getElementById('timer-completion-modal');
     const title = document.getElementById('timer-praise-title');
-    const msg = document.getElementById('timer-praise-msg');
+    const taskEl = document.getElementById('completed-task-name');
     const trivia = document.getElementById('timer-trivia-content');
     
     if (modal) {
         title.textContent = PRAISES[Math.floor(Math.random() * PRAISES.length)];
+        taskEl.textContent = taskName || "タスク完了";
         trivia.textContent = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
         modal.classList.add('active');
+        
+        createConfetti();
+    }
+}
+
+function createConfetti() {
+    const wrapper = document.getElementById('confetti-wrapper');
+    if (!wrapper) return;
+    wrapper.innerHTML = '';
+    const colors = ['#f8fafc', '#6366f1', '#10b981', '#f59e0b', '#ef4444'];
+    
+    for (let i = 0; i < 40; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = Math.random() * 100 + '%';
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDelay = Math.random() * 0.5 + 's';
+        piece.style.animationDuration = (Math.random() * 1.2 + 0.8) + 's';
+        wrapper.appendChild(piece);
     }
 }
 
@@ -835,6 +855,7 @@ function setupEventListeners() {
                 }
             }
             
+            const finishedTaskId = state.timer.taskId;
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
             
             timerDisplay.textContent = '00:00:00';
@@ -851,7 +872,9 @@ function setupEventListeners() {
                 renderWeeklySchedule();
             }
             
-            showTimerCompletionModal();
+            // Find task text for the celebration modal
+            const task = state.tasks.find(t => t.id === finishedTaskId);
+            showTimerCompletionModal(task ? task.text : "");
         });
     }
 
