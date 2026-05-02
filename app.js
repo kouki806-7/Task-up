@@ -511,10 +511,15 @@ function init() {
     applyLayoutMode();
     setupEventListeners();
     
+    let lastWidth = window.innerWidth;
     window.addEventListener('resize', () => {
+        // Only proceed if width actually changed (prevents issues with mobile address bars)
+        if (window.innerWidth === lastWidth) return;
+        lastWidth = window.innerWidth;
+
         if (state.settings && state.settings.layoutMode === 'auto') {
-            applyLayoutMode();
-            if (document.getElementById('view-schedule').classList.contains('active')) {
+            const changed = applyLayoutMode();
+            if (changed && document.getElementById('view-schedule').classList.contains('active')) {
                 renderWeeklySchedule();
             }
         }
@@ -905,20 +910,19 @@ function applyLayoutMode() {
     const mode = state.settings ? (state.settings.layoutMode || 'auto') : 'auto';
     const body = document.body;
     
-    body.classList.remove('pc-layout', 'mobile-layout');
-    
-    if (mode === 'mobile') {
-        body.classList.add('mobile-layout');
-    } else if (mode === 'pc') {
-        body.classList.add('pc-layout');
-    } else {
-        // Auto
-        if (window.innerWidth <= 768) {
-            body.classList.add('mobile-layout');
-        } else {
-            body.classList.add('pc-layout');
-        }
+    let target = '';
+    if (mode === 'mobile') target = 'mobile-layout';
+    else if (mode === 'pc') target = 'pc-layout';
+    else {
+        target = window.innerWidth <= 768 ? 'mobile-layout' : 'pc-layout';
     }
+    
+    if (!body.classList.contains(target)) {
+        body.classList.remove('pc-layout', 'mobile-layout');
+        body.classList.add(target);
+        return true; // Changed
+    }
+    return false; // No change
 }
 
 function setActiveStatBtn(btn) {
