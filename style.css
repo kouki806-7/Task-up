@@ -859,17 +859,24 @@ textarea {
    Mobile Layout Override
    ============================================== */
 .mobile-layout .sidebar {
-    width: 100%;
+    position: fixed !important;
+    width: 100% !important;
     height: 70px;
+    height: calc(70px + env(safe-area-inset-bottom));
     bottom: 0;
+    left: 0;
+    right: 0;
     top: auto;
     flex-direction: row;
     padding: 0.5rem;
+    padding-bottom: env(safe-area-inset-bottom);
     z-index: 100;
     border-right: none;
     border-top: 1px solid var(--panel-border);
     justify-content: space-around;
     align-items: center;
+    background: rgba(11, 15, 25, 0.95);
+    backdrop-filter: blur(20px);
 }
 
 .mobile-layout .logo {
