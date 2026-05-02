@@ -208,6 +208,50 @@ function formatTimer(seconds) {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+const TRIVIA = [
+    "空が青いのは、太陽の光が大気中の分子に当たって散乱し、波長の短い青い光が特に強く散乱されるからです（レイリー散乱）。",
+    "キリンの舌はとても長く、45cmから50cmほどもあり、自分の耳を掃除することもできます。",
+    "バナナは草の仲間で、木ではありません。また、イチゴはバラ科に属しています。",
+    "金星の1日は、地球の1年よりも長いです。金星が自転する速さは非常にゆっくりです。",
+    "人間の体の中で一番硬い組織は、歯のエナメル質です。",
+    "タコには心臓が3つあり、脳も9つ（各腕に1つずつと中央に1つ）あります。",
+    "世界で一番短い戦争は、イギリスとザンジバルの間で起きたもので、わずか38分で終わりました。",
+    "宇宙には匂いがあると言われており、宇宙飛行士によると「焼けたステーキ」や「熱い金属」のような匂いがするそうです。",
+    "クジラの心臓は非常に大きく、人間がその血管の中を泳げるほどのサイズのものもあります。",
+    "ペンギンは膝を曲げて座っています。足が短いように見えますが、実は体の中に長い脚が隠れています。",
+    "ミツバチは、1kgの蜂蜜を作るために、地球を約3周する距離を飛び回る必要があります。",
+    "カメレオンの舌の長さは、自分の体の約2倍にもなります。",
+    "アボカドは果物の一種ですが、脂肪分が多いため「森のバター」と呼ばれます。",
+    "エッフェル塔は、夏になると熱膨張によって高さが約15cm高くなることがあります。",
+    "マヨネーズはもともと、スペインのメノルカ島にあるマオンという町で作られたソース（マオンのソース）が語源です。",
+    "地球の自転速度は徐々に遅くなっており、100年ごとに1日の長さが約2ミリ秒長くなっています。",
+    "ナマケモノは泳ぐのが意外と得意で、地上よりも水中のほうが速く移動できます。",
+    "シャチはイルカの仲間の中で最大の種です。",
+    "富士山の山頂は、実は特定の県（静岡県や山梨県）に属しておらず、富士山本宮浅間大社の私有地です。",
+    "トランプのカードの4人のキングは、それぞれ歴史上の有名な人物（アレキサンダー大王、カエサル、ダビデ王、シャルルマーニュ）がモデルと言われています。"
+];
+
+const PRAISES = [
+    "お疲れ様でした！素晴らしい集中力です。",
+    "完遂おめでとうございます！一歩前進ですね。",
+    "ナイスワーク！この調子で頑張りましょう。",
+    "やりきりましたね！自分を褒めてあげてください。",
+    "集中お疲れ様でした。少し休憩も挟んでくださいね。"
+];
+
+function showTimerCompletionModal() {
+    const modal = document.getElementById('timer-completion-modal');
+    const title = document.getElementById('timer-praise-title');
+    const msg = document.getElementById('timer-praise-msg');
+    const trivia = document.getElementById('timer-trivia-content');
+    
+    if (modal) {
+        title.textContent = PRAISES[Math.floor(Math.random() * PRAISES.length)];
+        trivia.textContent = TRIVIA[Math.floor(Math.random() * TRIVIA.length)];
+        modal.classList.add('active');
+    }
+}
+
 function updateTimerSelect() {
     if (!timerSelect) return;
     
@@ -337,6 +381,9 @@ async function fetchCloudData() {
             state.schedules = cloudState.schedules || [];
             state.history = cloudState.history || {};
             state.lastDate = cloudState.lastDate || '';
+            if (cloudState.settings) {
+                state.settings = { ...state.settings, ...cloudState.settings };
+            }
             
             // Re-render views
             renderDashboard();
@@ -371,7 +418,8 @@ async function saveToCloud() {
             routines: state.routines,
             schedules: state.schedules,
             history: state.history,
-            lastDate: state.lastDate
+            lastDate: state.lastDate,
+            settings: state.settings // Sync settings (API keys, layout, etc.)
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
         
@@ -788,6 +836,15 @@ function setupEventListeners() {
             if (document.getElementById('view-schedule').classList.contains('active')) {
                 renderWeeklySchedule();
             }
+            
+            showTimerCompletionModal();
+        });
+    }
+
+    const btnCloseTimerModal = document.getElementById('btn-close-timer-modal');
+    if (btnCloseTimerModal) {
+        btnCloseTimerModal.addEventListener('click', () => {
+            document.getElementById('timer-completion-modal').classList.remove('active');
         });
     }
 }
