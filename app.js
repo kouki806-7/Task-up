@@ -28,9 +28,14 @@ let state = {
 };
 
 function getTodayString() {
-    const today = new Date();
-    // Use local timezone format (YYYY-MM-DD)
-    return today.toLocaleDateString('en-CA'); 
+    const now = new Date();
+    // Treat midnight–5am as still belonging to the previous day (schedule boundary)
+    if (now.getHours() < 5) {
+        const prevDay = new Date(now);
+        prevDay.setDate(prevDay.getDate() - 1);
+        return prevDay.toLocaleDateString('en-CA');
+    }
+    return now.toLocaleDateString('en-CA');
 }
 
 function loadData() {
@@ -59,10 +64,9 @@ function loadData() {
     // Check for new day
     const today = getTodayString();
     if (state.lastDate !== today) {
-        // It's a new day! 
-        // 1. Wipe current non-routine tasks, or reset them? The requirement says "auto-generate routine tasks for the next day".
-        // Let's clear tasks and only populate with routines.
-        state.tasks = state.routines.map(r => ({
+        // Carry over incomplete non-routine tasks; routine tasks are regenerated fresh each day
+        const carryOverTasks = state.tasks.filter(t => !t.completed && !t.isRoutine);
+        const routineTasks = state.routines.map(r => ({
             id: generateId(),
             text: r.text,
             duration: r.duration,
@@ -71,6 +75,7 @@ function loadData() {
             completed: false,
             isRoutine: true
         }));
+        state.tasks = [...carryOverTasks, ...routineTasks];
         state.lastDate = today;
         saveData();
     }
@@ -281,8 +286,9 @@ function updateTimerSelect() {
     
     timerSelect.innerHTML = '<option value="">(タスクを選択してください)</option>';
     
-    // 1. Get today's incomplete tasks
-    let tasksToShow = state.tasks.filter(t => !t.completed && t.date === getTodayString());
+    // 1. Get today's incomplete tasks + past incomplete tasks
+    const todayStr = getTodayString();
+    let tasksToShow = state.tasks.filter(t => !t.completed && t.date <= todayStr);
     
     // 2. If a timer is active, ensure THAT task is in the list (even if from another day or completed)
     if (state.timer && state.timer.taskId) {
@@ -297,7 +303,7 @@ function updateTimerSelect() {
     tasksToShow.forEach(t => {
         const opt = document.createElement('option');
         opt.value = t.id;
-        const dateNote = t.date !== getTodayString() ? ` [${t.date}]` : "";
+        const dateNote = t.date !== todayStr ? ` (${t.date.substring(5)})` : "";
         opt.textContent = t.text + dateNote;
         timerSelect.appendChild(opt);
     });
@@ -1188,8 +1194,14 @@ function renderDashboard() {
     let active = 0;
     let completed = 0;
 
+    const todayStr = getTodayString();
     state.tasks.forEach(task => {
-        if (task.date !== getTodayString()) return;
+        const isToday = task.date === todayStr;
+        const isOverdue = task.date < todayStr && !task.completed;
+        
+        if (!isToday && !isOverdue) return;
+        
+        const displayName = (task.date < todayStr) ? `${task.text} (${task.date.substring(5)})` : task.text;
         const li = document.createElement('li');
         li.className = 'task-item';
         
@@ -1210,7 +1222,7 @@ function renderDashboard() {
         li.innerHTML = `
             <div class="task-checkbox ${task.completed ? 'checked' : ''}" onclick="toggleTask('${task.id}')"></div>
             <div class="task-content">
-                <div class="task-name">${task.text}</div>
+                <div class="task-name">${displayName}</div>
                 <div class="task-meta">
                     ${tagBadge}
                     ${durStr}
@@ -1359,30 +1371,94 @@ function renderHistoryCalendar() {
 
 function showHistoryDetail(dateStr) {
     const data = state.history[dateStr];
-    
-    if (!data) {
-        historyDetailContent.innerHTML = `<p class="empty-state">この日の振り返りデータはありません。</p>`;
+    const dayTasks = state.tasks.filter(t => t.date === dateStr);
+    const daySchedules = state.schedules
+        .filter(s => s.date === dateStr)
+        .sort((a, b) => {
+            // Sort by start time, treating <05:00 as next-day (same as schedule view)
+            const toMins = t => {
+                const [h, m] = t.split(':').map(Number);
+                return (h < 5 ? h + 24 : h) * 60 + m;
+            };
+            return toMins(a.startTime) - toMins(b.startTime);
+        });
+
+    if (!data && daySchedules.length === 0 && dayTasks.length === 0) {
+        historyDetailContent.innerHTML = `<p class="empty-state">この日のデータはありません。</p>`;
         return;
     }
 
-    // Color code based on rate
-    let color = 'var(--text-primary)';
-    if (data.rate >= 80) color = 'var(--success-color)';
-    else if (data.rate <= 30) color = 'var(--danger-color)';
+    const tagBorderMap = {
+        '講義':     '#3b82f6',
+        '勉強・課題': '#10b981',
+        '趣味・遊び': '#f59e0b',
+        'タスク':    '#8b5cf6',
+        'カレンダー': '#ef4444',
+        'record':   '#f43f5e'
+    };
+    const tagBgMap = {
+        '講義':     'rgba(59, 130, 246, 0.12)',
+        '勉強・課題': 'rgba(16, 185, 129, 0.12)',
+        '趣味・遊び': 'rgba(245, 158, 11, 0.12)',
+        'タスク':    'rgba(139, 92, 246, 0.12)',
+        'カレンダー': 'rgba(239, 68, 68, 0.12)',
+        'record':   'rgba(244, 63, 94, 0.18)'
+    };
 
-    historyDetailContent.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-            <h4 style="font-size: 1.2rem; color: var(--text-secondary)">${dateStr}</h4>
-            <div style="font-size: 1.5rem; font-weight: bold; color: ${color}">${data.rate}%</div>
-        </div>
-        <div style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
-            全 ${data.tasksTotal} タスク中 ${data.tasksCompleted} 個完了
-        </div>
-        <div style="font-weight: 600; margin-bottom: 0.5rem;">メモ</div>
-        <div class="history-memo">
-            ${data.memo ? data.memo.replace(/\n/g, '<br>') : '<em>メモはありません。</em>'}
-        </div>
-    `;
+    let html = `<h4 style="font-size: 1rem; color: var(--text-secondary); margin-bottom: 1rem;">${dateStr}</h4>`;
+
+    // --- Reflection summary ---
+    if (data) {
+        let rateColor = 'var(--text-primary)';
+        if (data.rate >= 80) rateColor = 'var(--success-color)';
+        else if (data.rate <= 30) rateColor = 'var(--danger-color)';
+
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                <span style="color:var(--text-secondary); font-size:0.9rem;">${data.tasksCompleted} / ${data.tasksTotal} タスク完了</span>
+                <span style="font-size:1.4rem; font-weight:bold; color:${rateColor}">${data.rate}%</span>
+            </div>`;
+
+        if (data.memo) {
+            html += `<div class="history-memo" style="margin-bottom:1.25rem;">${data.memo.replace(/\n/g, '<br>')}</div>`;
+        }
+    }
+
+    // --- Task list ---
+    if (dayTasks.length > 0) {
+        html += `<div style="font-weight:600; font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:0.5rem; margin-top:${data ? '0.25rem' : '0'};">タスク</div>`;
+        dayTasks.forEach(task => {
+            const done = task.completed;
+            const color = tagBorderMap[task.tag] || tagBorderMap['タスク'];
+            html += `
+                <div style="display:flex; align-items:center; gap:0.6rem; padding:0.35rem 0; border-bottom:1px solid var(--panel-border); font-size:0.9rem;">
+                    <span style="width:8px; height:8px; border-radius:50%; background:${color}; flex-shrink:0;"></span>
+                    <span style="${done ? 'text-decoration:line-through; color:var(--text-secondary);' : ''}">${task.text}</span>
+                    ${task.duration ? `<span style="margin-left:auto; color:var(--text-secondary); font-size:0.8rem; white-space:nowrap;">${task.duration}分</span>` : ''}
+                </div>`;
+        });
+        html += `<div style="margin-bottom:1.25rem;"></div>`;
+    }
+
+    // --- Schedule timeline ---
+    if (daySchedules.length > 0) {
+        html += `<div style="font-weight:600; font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:0.6rem;">スケジュール</div>`;
+        daySchedules.forEach(sched => {
+            const border = tagBorderMap[sched.tag] || tagBorderMap['タスク'];
+            const bg    = tagBgMap[sched.tag]    || tagBgMap['タスク'];
+            html += `
+                <div style="display:flex; gap:0.6rem; align-items:stretch; margin-bottom:0.45rem;">
+                    <div style="width:3px; background:${border}; border-radius:2px; flex-shrink:0;"></div>
+                    <div style="flex:1; background:${bg}; border-radius:6px; padding:0.45rem 0.7rem;">
+                        <div style="font-size:0.9rem; font-weight:500;">${sched.title}</div>
+                        <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.1rem;">${sched.startTime} – ${sched.endTime}</div>
+                        ${sched.memo ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.15rem;">${sched.memo}</div>` : ''}
+                    </div>
+                </div>`;
+        });
+    }
+
+    historyDetailContent.innerHTML = html;
 }
 
 // --- Stats Logic ---
