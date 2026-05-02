@@ -694,6 +694,10 @@ textarea {
     position: relative;
 }
 
+.mobile-layout .weekly-grid {
+    min-width: 100%;
+}
+
 .weekly-time-column {
     width: 50px;
     min-width: 50px;

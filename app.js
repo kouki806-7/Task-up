@@ -130,7 +130,7 @@ const statsContent = document.getElementById('stats-content');
 const btnPrevWeek = document.getElementById('prev-week');
 const btnNextWeek = document.getElementById('next-week');
 const formSchedule = document.getElementById('add-schedule-form');
-let currentWeekStart = getMonday(new Date());
+let currentWeekStart = new Date(); // Represents the currently selected date in schedule view
 
 function getMonday(d) {
   d = new Date(d);
@@ -363,6 +363,9 @@ function init() {
     window.addEventListener('resize', () => {
         if (state.settings && state.settings.layoutMode === 'auto') {
             applyLayoutMode();
+            if (document.getElementById('view-schedule').classList.contains('active')) {
+                renderWeeklySchedule();
+            }
         }
     });
 
@@ -471,11 +474,15 @@ function setupEventListeners() {
 
     // Schedule
     if(btnPrevWeek) btnPrevWeek.addEventListener('click', () => {
-        currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+        const isMobile = document.body.classList.contains('mobile-layout');
+        const step = isMobile ? 1 : 7;
+        currentWeekStart.setDate(currentWeekStart.getDate() - step);
         renderWeeklySchedule();
     });
     if(btnNextWeek) btnNextWeek.addEventListener('click', () => {
-        currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        const isMobile = document.body.classList.contains('mobile-layout');
+        const step = isMobile ? 1 : 7;
+        currentWeekStart.setDate(currentWeekStart.getDate() + step);
         renderWeeklySchedule();
     });
 
@@ -789,7 +796,8 @@ function addSchedule(title, date, startTime, endTime, tag, memo, gcalId = null) 
 
 async function fetchGoogleCalendarEvents(silent = false) {
     try {
-        const start = new Date(currentWeekStart);
+        // Always sync the whole week containing the selected date
+        const start = getMonday(currentWeekStart);
         start.setHours(0,0,0,0);
         const end = new Date(currentWeekStart);
         end.setDate(end.getDate() + 7);
@@ -1308,10 +1316,18 @@ function renderWeeklySchedule() {
 
     grid.innerHTML = '';
     
-    const endOfWeek = new Date(currentWeekStart);
-    endOfWeek.setDate(endOfWeek.getDate() + 6);
-    document.getElementById('schedule-week-display').textContent = 
-        `${currentWeekStart.getFullYear()}年 ${currentWeekStart.getMonth()+1}月${currentWeekStart.getDate()}日 〜 ${endOfWeek.getMonth()+1}月${endOfWeek.getDate()}日`;
+    const isMobile = document.body.classList.contains('mobile-layout');
+    
+    if (isMobile) {
+        document.getElementById('schedule-week-display').textContent = 
+            currentWeekStart.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+    } else {
+        const weekStart = getMonday(currentWeekStart);
+        const endOfWeek = new Date(weekStart);
+        endOfWeek.setDate(endOfWeek.getDate() + 6);
+        document.getElementById('schedule-week-display').textContent = 
+            `${weekStart.getFullYear()}年 ${weekStart.getMonth()+1}月${weekStart.getDate()}日 〜 ${endOfWeek.getMonth()+1}月${endOfWeek.getDate()}日`;
+    }
 
     // Fixed height constants for alignment (JS controls height, not CSS)
     const HEADER_H = 60;  // header area height in px
@@ -1333,13 +1349,17 @@ function renderWeeklySchedule() {
     grid.appendChild(timeCol);
 
     const todayStr = getTodayString();
-    const days = ['月', '火', '水', '木', '金', '土', '日'];
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
     
-    for (let i = 0; i < 7; i++) {
-        const currentDate = new Date(currentWeekStart);
+    const baseDate = isMobile ? currentWeekStart : getMonday(currentWeekStart);
+    const numDays = isMobile ? 1 : 7;
+    
+    for (let i = 0; i < numDays; i++) {
+        const currentDate = new Date(baseDate);
         currentDate.setDate(currentDate.getDate() + i);
         const dateStr = currentDate.toLocaleDateString('en-CA');
         const isToday = dateStr === todayStr;
+        const dayLabel = days[currentDate.getDay()];
 
         const col = document.createElement('div');
         col.className = 'weekly-column';
@@ -1347,7 +1367,7 @@ function renderWeeklySchedule() {
         // Header
         const header = document.createElement('div');
         header.className = `weekly-header ${isToday ? 'today' : ''}`;
-        header.innerHTML = `<div class="weekly-day">${days[i]}</div><div class="weekly-date">${currentDate.getDate()}</div>`;
+        header.innerHTML = `<div class="weekly-day">${dayLabel}</div><div class="weekly-date">${currentDate.getDate()}</div>`;
         col.appendChild(header);
 
         // Tasks container — height is set via JS to match time-col-spacer exactly
