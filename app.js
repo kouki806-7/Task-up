@@ -422,9 +422,15 @@ async function fetchCloudData() {
             if (cloudState.settings) {
                 state.settings = { ...state.settings, ...cloudState.settings };
             }
-            
+            if (cloudState.timer) {
+                // Stop any locally running interval before overwriting timer state
+                if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+                state.timer = cloudState.timer;
+            }
+
             // Re-render views
             renderDashboard();
+            syncTimerUI();   // resume timer display if it was running on another device
             if (document.getElementById('view-history').classList.contains('active')) renderHistoryCalendar();
             if (document.getElementById('view-schedule').classList.contains('active')) renderWeeklySchedule();
             
@@ -457,7 +463,8 @@ async function saveToCloud() {
             schedules: state.schedules,
             history: state.history,
             lastDate: state.lastDate,
-            settings: state.settings // Sync settings (API keys, layout, etc.)
+            settings: state.settings,
+            timer: state.timer   // sync timer state for multi-device resume
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
         
@@ -859,12 +866,12 @@ function setupEventListeners() {
 
                 state.schedules.push({
                     id: generateId(),
-                    title: task.text,
+                    title: `⏱ ${task.text}`,
                     date: dateStr,
                     startTime: startStr,
                     endTime: endStr,
                     tag: 'record',
-                    memo: `タイマー記録: ${formatTimer(totalSeconds)}`
+                    memo: `計測時間: ${formatTimer(totalSeconds)}`
                 });
 
                 const historyDateStr = getTodayString();
