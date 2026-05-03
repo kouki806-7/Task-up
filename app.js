@@ -152,6 +152,7 @@ let currentWeekStart = new Date(); // Represents the currently selected date in 
 const btnTimerStart = document.getElementById('btn-timer-start');
 const btnTimerPause = document.getElementById('btn-timer-pause');
 const btnTimerFinish = document.getElementById('btn-timer-finish');
+const btnTimerReset = document.getElementById('btn-timer-reset');
 const btnTimerCancel = document.getElementById('btn-timer-cancel');
 const timerDisplay = document.getElementById('timer-display');
 const timerSelect = document.getElementById('timer-task-select');
@@ -339,9 +340,10 @@ function syncTimerUI() {
         timerSelect.disabled = true;
         btnTimerStart.innerHTML = '⏸ 一時停止';
         btnTimerStart.classList.replace('primary', 'secondary');
-        btnTimerPause.style.display = 'none'; // We'll hide the old pause button
+        btnTimerPause.style.display = 'none';
         btnTimerFinish.disabled = false;
         btnTimerCancel.style.display = 'block';
+        if (btnTimerReset) btnTimerReset.style.display = 'block';
         runTimerInterval();
     } else if (state.timer.accumulatedSeconds > 0) {
         timerSelect.value = state.timer.taskId;
@@ -351,12 +353,14 @@ function syncTimerUI() {
         btnTimerPause.style.display = 'none';
         btnTimerFinish.disabled = false;
         btnTimerCancel.style.display = 'block';
+        if (btnTimerReset) btnTimerReset.style.display = 'block';
         updateTimerDisplay();
     } else {
         btnTimerStart.innerHTML = '▶ 開始';
         btnTimerStart.classList.replace('secondary', 'primary');
         btnTimerPause.style.display = 'none';
         btnTimerCancel.style.display = 'none';
+        if (btnTimerReset) btnTimerReset.style.display = 'none';
         updateTimerDisplay();
     }
 }
@@ -825,60 +829,66 @@ function setupEventListeners() {
 
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = null;
-            
+
             if (totalSeconds < 60) {
-                alert("1分未満のため、実績として記録されません。");
-            } else {
-                const task = state.tasks.find(t => t.id === state.timer.taskId);
-                if (task) {
-                    task.completed = true;
-                    
-                    // Use a safe reference for startTime or estimate it
-                    const startTs = state.timer.isRunning ? state.timer.startTime : (now - totalSeconds * 1000);
-                    const startD = new Date(startTs);
-                    const endD = new Date(now);
-                    
-                    const startStr = `${startD.getHours().toString().padStart(2, '0')}:${startD.getMinutes().toString().padStart(2, '0')}`;
-                    const endStr = `${endD.getHours().toString().padStart(2, '0')}:${endD.getMinutes().toString().padStart(2, '0')}`;
-                    
-                    let dateStr = getTodayString();
-                    if (now.getHours() < 5) {
-                        const prevDay = new Date(now);
-                        prevDay.setDate(prevDay.getDate() - 1);
-                        dateStr = prevDay.toLocaleDateString('en-CA');
-                    }
-                    
-                    state.schedules.push({
-                        id: generateId(),
-                        title: task.text,
-                        date: dateStr,
-                        startTime: startStr,
-                        endTime: endStr,
-                        tag: 'record',
-                        memo: `タイマー記録: ${formatTimer(totalSeconds)}`
-                    });
-                    
-                    const historyDateStr = getTodayString();
-                    if (!state.history[historyDateStr]) state.history[historyDateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
-                    state.history[historyDateStr].tasksCompleted++;
-                } else {
-                    console.error("[Timer] Task not found for ID:", state.timer.taskId);
-                }
+                alert("1分未満のため、実績として記録されません。タイマーはそのまま継続できます。");
+                if (state.timer.isRunning) runTimerInterval();
+                return;
             }
-            
+
+            // Flash the timer display green before resetting
+            timerDisplay.classList.add('timer-flash');
+
+            const task = state.tasks.find(t => t.id === state.timer.taskId);
+            if (task) {
+                task.completed = true;
+
+                const startTs = state.timer.isRunning ? state.timer.startTime : (now - totalSeconds * 1000);
+                const startD = new Date(startTs);
+                const endD = new Date(now);
+
+                const startStr = `${startD.getHours().toString().padStart(2, '0')}:${startD.getMinutes().toString().padStart(2, '0')}`;
+                const endStr = `${endD.getHours().toString().padStart(2, '0')}:${endD.getMinutes().toString().padStart(2, '0')}`;
+
+                let dateStr = getTodayString();
+                if (now.getHours() < 5) {
+                    const prevDay = new Date(now);
+                    prevDay.setDate(prevDay.getDate() - 1);
+                    dateStr = prevDay.toLocaleDateString('en-CA');
+                }
+
+                state.schedules.push({
+                    id: generateId(),
+                    title: task.text,
+                    date: dateStr,
+                    startTime: startStr,
+                    endTime: endStr,
+                    tag: 'record',
+                    memo: `タイマー記録: ${formatTimer(totalSeconds)}`
+                });
+
+                const historyDateStr = getTodayString();
+                if (!state.history[historyDateStr]) state.history[historyDateStr] = { rate: 0, tasksCompleted: 0, tasksTotal: 0, memo: '', durationByTag: {} };
+                state.history[historyDateStr].tasksCompleted++;
+            } else {
+                console.error("[Timer] Task not found for ID:", state.timer.taskId);
+            }
+
             const finishedTaskId = state.timer.taskId;
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
-            
+
             saveData();
-            syncTimerUI(); // Centralized UI reset
-            
+            syncTimerUI();
+
             if (document.getElementById('view-schedule').classList.contains('active')) {
                 renderWeeklySchedule();
             }
-            
-            // Find task text for the celebration modal
-            const task = state.tasks.find(t => t.id === finishedTaskId);
-            showTimerCompletionModal(task ? task.text : "");
+
+            const finishedTask = state.tasks.find(t => t.id === finishedTaskId);
+            setTimeout(() => {
+                timerDisplay.classList.remove('timer-flash');
+                showTimerCompletionModal(finishedTask ? finishedTask.text : "");
+            }, 400);
         });
     }
 
@@ -904,10 +914,49 @@ function setupEventListeners() {
         });
     }
 
+    if (btnTimerReset) {
+        btnTimerReset.addEventListener('click', () => {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+
+            const currentTaskId = state.timer.taskId;
+            state.timer = { taskId: currentTaskId, startTime: null, isRunning: false, accumulatedSeconds: 0 };
+
+            saveData();
+            // syncTimerUI shows idle state but keeps task in dropdown
+            timerSelect.disabled = false;
+            btnTimerFinish.disabled = true;
+            btnTimerCancel.style.display = 'none';
+            btnTimerReset.style.display = 'none';
+            btnTimerStart.innerHTML = '▶ 開始';
+            btnTimerStart.classList.replace('secondary', 'primary');
+            timerDisplay.textContent = '00:00:00';
+            updateTimerSelect();
+            if (currentTaskId) timerSelect.value = currentTaskId;
+        });
+    }
+
     const btnCloseTimerModal = document.getElementById('btn-close-timer-modal');
     if (btnCloseTimerModal) {
         btnCloseTimerModal.addEventListener('click', () => {
             document.getElementById('timer-completion-modal').classList.remove('active');
+        });
+    }
+
+    const btnNextTask = document.getElementById('btn-next-task');
+    if (btnNextTask) {
+        btnNextTask.addEventListener('click', () => {
+            document.getElementById('timer-completion-modal').classList.remove('active');
+
+            const todayStr = getTodayString();
+            const next = state.tasks
+                .filter(t => !t.completed && t.date <= todayStr)
+                .sort((a, b) => a.text.localeCompare(b.text))[0];
+
+            updateTimerSelect();
+            if (next) {
+                timerSelect.value = next.id;
+            }
         });
     }
 }

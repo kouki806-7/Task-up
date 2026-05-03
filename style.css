@@ -1046,3 +1046,14 @@ textarea {
     box-shadow: -4px 0 10px rgba(0,0,0,0.3);
 }
 
+/* Timer completion flash */
+@keyframes timerFlash {
+    0%   { color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow); transform: scale(1); }
+    30%  { color: #10b981; text-shadow: 0 0 70px rgba(16,185,129,0.95), 0 0 120px rgba(16,185,129,0.35); transform: scale(1.07); }
+    70%  { color: #10b981; text-shadow: 0 0 45px rgba(16,185,129,0.7); transform: scale(1.03); }
+    100% { color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow); transform: scale(1); }
+}
+.timer-flash {
+    animation: timerFlash 0.65s ease-out forwards;
+}
+
