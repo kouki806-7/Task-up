@@ -11,6 +11,7 @@ let state = {
     routines: [],     // { id, text, duration, tag }
     schedules: [],    // { id, gcalId, title, date, startTime, endTime, tag, memo }
     history: {},      // { 'YYYY-MM-DD': { rate, tasksTotal, tasksCompleted, memo, durationByTag } }
+    memos: [],        // { id, text, createdAt, done }
     lastDate: '',     // 'YYYY-MM-DD'
     settings: {
         apiKey: 'AIzaSyDy-UDkVaLk5zLkojM3IOtzPZTwFpCtfSA',
@@ -56,6 +57,7 @@ function loadData() {
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
+        if (!state.memos) state.memos = [];
         if (!state.timer) {
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
         }
@@ -423,10 +425,10 @@ async function fetchCloudData() {
                 state.settings = { ...state.settings, ...cloudState.settings };
             }
             if (cloudState.timer) {
-                // Stop any locally running interval before overwriting timer state
                 if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
                 state.timer = cloudState.timer;
             }
+            state.memos = cloudState.memos || [];
 
             // Re-render views
             renderDashboard();
@@ -464,7 +466,8 @@ async function saveToCloud() {
             history: state.history,
             lastDate: state.lastDate,
             settings: state.settings,
-            timer: state.timer   // sync timer state for multi-device resume
+            timer: state.timer,
+            memos: state.memos
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
         
@@ -620,6 +623,18 @@ function setupEventListeners() {
             inputTag.value = 'タスク';
         }
     });
+
+    // Adding Memo (タスク未満)
+    const formMemo = document.getElementById('add-memo-form');
+    if (formMemo) {
+        formMemo.addEventListener('submit', e => {
+            e.preventDefault();
+            const input = document.getElementById('memo-text');
+            if (!input.value.trim()) return;
+            addMemo(input.value);
+            input.value = '';
+        });
+    }
 
     // Smart Import
     btnImport.addEventListener('click', () => {
@@ -1191,6 +1206,52 @@ function autoSyncGoogleCalendar() {
     }
 }
 
+// --- Memo (タスク未満) ---
+function renderMemos() {
+    const memoList = document.getElementById('memo-list');
+    const memoCount = document.getElementById('memo-count');
+    if (!memoList) return;
+
+    memoList.innerHTML = '';
+    const memos = state.memos || [];
+    if (memoCount) memoCount.textContent = memos.length;
+
+    if (memos.length === 0) {
+        memoList.innerHTML = '<li style="color:var(--text-secondary);font-size:0.85rem;padding:0.5rem 0;text-align:center;">まだ登録がありません</li>';
+        return;
+    }
+
+    const svgTrash = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+
+    memos.forEach(memo => {
+        const li = document.createElement('li');
+        li.className = `memo-item${memo.done ? ' done' : ''}`;
+        li.innerHTML = `
+            <div class="memo-dot" onclick="toggleMemo('${memo.id}')"></div>
+            <span class="memo-text" onclick="toggleMemo('${memo.id}')">${memo.text}</span>
+            <span style="font-size:0.72rem;color:var(--text-secondary);margin-right:4px;white-space:nowrap;flex-shrink:0;">${memo.createdAt ? memo.createdAt.substring(5).replace('-', '/') : ''}</span>
+            <button class="btn-delete" onclick="deleteMemo('${memo.id}')">${svgTrash}</button>
+        `;
+        memoList.appendChild(li);
+    });
+}
+
+function addMemo(text) {
+    if (!state.memos) state.memos = [];
+    state.memos.unshift({ id: generateId(), text: text.trim(), createdAt: getTodayString(), done: false });
+    saveData();
+}
+
+function deleteMemo(id) {
+    state.memos = (state.memos || []).filter(m => m.id !== id);
+    saveData();
+}
+
+function toggleMemo(id) {
+    const memo = (state.memos || []).find(m => m.id === id);
+    if (memo) { memo.done = !memo.done; saveData(); }
+}
+
 // --- Smart Text Parser ---
 function smartParse(rawText, importType = 'task') {
     // Looks for patterns like "10:00～11:00 Event Name" or "10:00 - 11:30 Meeting"
@@ -1303,6 +1364,7 @@ function renderDashboard() {
     countCompleted.textContent = completed;
 
     updateProgressRing(completed, active + completed);
+    renderMemos();
 }
 
 function updateProgressRing(completed, total) {

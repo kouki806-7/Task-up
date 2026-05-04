@@ -119,6 +119,17 @@
                         <p class="help-text">Googleカレンダーのテキストを貼り付け</p>
                         <textarea id="gcal-import" rows="3" placeholder="例: 10:00～11:00 ミーティング..."></textarea>
                         <button id="btn-import" class="btn secondary w-full">解析して追加</button>
+
+                        <div class="divider"><span>タスク未満</span></div>
+                        <p class="help-text" style="margin-bottom: 0.75rem; margin-top: -0.5rem;">期限・時間設定不要の覚え書き</p>
+                        <form id="add-memo-form">
+                            <div style="display: flex; gap: 0.5rem;">
+                                <div class="input-group" style="flex: 1; margin-bottom: 0;">
+                                    <input type="text" id="memo-text" placeholder="覚えておきたいこと...">
+                                </div>
+                                <button type="submit" class="btn secondary" style="white-space: nowrap; padding: 0 1.25rem;">追加</button>
+                            </div>
+                        </form>
                     </div>
 
                     <!-- Task List Area -->
@@ -131,6 +142,11 @@
                         <h3 class="mt-xl">完了済み <span class="badge" id="completed-count">0</span></h3>
                         <ul id="completed-task-list" class="task-list completed-list">
                             <!-- Tasks injected here -->
+                        </ul>
+
+                        <h3 class="mt-xl">タスク未満 <span class="badge" id="memo-count">0</span></h3>
+                        <ul id="memo-list" class="memo-list">
+                            <!-- Memos injected here -->
                         </ul>
                     </div>
                 </div>

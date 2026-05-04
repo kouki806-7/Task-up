@@ -455,6 +455,69 @@ textarea {
     background: rgba(239, 68, 68, 0.1);
 }
 
+/* Memo (タスク未満) */
+.memo-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.memo-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(245, 158, 11, 0.04);
+    border: 1px dashed rgba(245, 158, 11, 0.3);
+    border-radius: var(--radius-md);
+    transition: var(--transition);
+    animation: slideIn 0.3s ease;
+}
+
+.memo-item:hover {
+    background: rgba(245, 158, 11, 0.09);
+    border-color: rgba(245, 158, 11, 0.55);
+    transform: translateX(4px);
+}
+
+.memo-item:hover .btn-delete {
+    opacity: 1;
+}
+
+.memo-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid rgba(245, 158, 11, 0.7);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.memo-item:hover .memo-dot {
+    border-color: #f59e0b;
+}
+
+.memo-item.done .memo-dot {
+    background: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.memo-text {
+    flex: 1;
+    font-size: 0.9rem;
+    cursor: pointer;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+.memo-item.done .memo-text {
+    text-decoration: line-through;
+    color: var(--text-secondary);
+    opacity: 0.65;
+}
+
 /* Completed List */
 .completed-list .task-item {
     opacity: 0.6;
