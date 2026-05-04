@@ -919,6 +919,14 @@ textarea {
     opacity: 0.5;
 }
 
+.task-record-time {
+    font-size: 0.68rem;
+    color: #fb7185;
+    white-space: nowrap;
+    margin-top: 2px;
+    opacity: 0.85;
+}
+
 .weekly-timeline {
     position: relative;
     height: 1440px; /* 24 hours * 60px/hour */

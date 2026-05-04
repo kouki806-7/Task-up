@@ -1774,11 +1774,22 @@ function renderWeeklySchedule() {
         
         const dayTasks = state.tasks.filter(t => t.date === dateStr);
         dayTasks.forEach(task => {
+            // Find matching timer record for this task on this date
+            const record = task.completed
+                ? state.schedules.find(s => s.date === dateStr && s.tag === 'record' && s.title === `⏱ ${task.text}`)
+                : null;
+
             const tDiv = document.createElement('div');
             tDiv.className = `weekly-task-item ${task.completed ? 'completed' : ''}`;
+            if (record) tDiv.style.alignItems = 'flex-start';
+
             tDiv.innerHTML = `
-                <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="toggleTask('${task.id}'); if(document.getElementById('view-schedule').classList.contains('active')) renderWeeklySchedule();">
-                <div class="weekly-task-text" title="${task.text}">${task.text}</div>
+                <input type="checkbox" ${task.completed ? 'checked' : ''} style="flex-shrink:0;${record ? ' margin-top:2px;' : ''}"
+                    onchange="toggleTask('${task.id}'); if(document.getElementById('view-schedule').classList.contains('active')) renderWeeklySchedule();">
+                <div style="flex:1; min-width:0;">
+                    <div class="weekly-task-text" title="${task.text}">${task.text}</div>
+                    ${record ? `<div class="task-record-time">⏱ ${record.startTime}–${record.endTime}</div>` : ''}
+                </div>
             `;
             tasksDiv.appendChild(tDiv);
         });
