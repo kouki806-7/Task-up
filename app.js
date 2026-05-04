@@ -906,11 +906,10 @@ function setupEventListeners() {
                 renderWeeklySchedule();
             }
 
+            // Show modal immediately — flash animation (0.65s CSS) plays through the overlay fade-in
             const finishedTask = state.tasks.find(t => t.id === finishedTaskId);
-            setTimeout(() => {
-                timerDisplay.classList.remove('timer-flash');
-                showTimerCompletionModal(finishedTask ? finishedTask.text : "");
-            }, 400);
+            showTimerCompletionModal(finishedTask ? finishedTask.text : "");
+            setTimeout(() => timerDisplay.classList.remove('timer-flash'), 700);
         });
     }
 
