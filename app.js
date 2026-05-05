@@ -988,9 +988,6 @@ function setupEventListeners() {
     const btnFetchMail = document.getElementById('btn-fetch-mail');
     if (btnFetchMail) btnFetchMail.addEventListener('click', fetchGmailMessages);
 
-    const btnApplyMailFilter = document.getElementById('btn-apply-mail-filter');
-    if (btnApplyMailFilter) btnApplyMailFilter.addEventListener('click', fetchGmailMessages);
-
     const btnAddFromNormal = document.getElementById('btn-add-from-normal');
     if (btnAddFromNormal) btnAddFromNormal.addEventListener('click', () => addMailFromFilter(false));
 
@@ -1004,10 +1001,7 @@ function setupEventListeners() {
         });
     }
 
-    const mailToInput = document.getElementById('mail-to-input');
-    if (mailToInput && state.settings.mailToFilter) mailToInput.value = state.settings.mailToFilter;
-
-    renderMailFromChips();
+    renderMailAddressTabs();
 }
 
 function applyLayoutMode() {
@@ -1234,6 +1228,9 @@ function autoSyncGoogleCalendar() {
 }
 
 // --- Gmail / Mail View ---
+let mailCache = {};          // cacheKey → { messages: [], fetchedAt: timestamp }
+let selectedMailFilterIdx = -1;
+
 function decodeBase64Url(str) {
     try {
         const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -1273,36 +1270,79 @@ function getMailHeader(headers, name) {
     return h ? h.value : '';
 }
 
-function renderMailList(messages) {
-    const mailList = document.getElementById('mail-list');
-    if (!mailList) return;
-    if (!messages || messages.length === 0) {
-        mailList.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
+function renderMailAddressTabs() {
+    const container = document.getElementById('mail-address-tabs');
+    if (!container) return;
+    const filters = state.settings.mailFromFilters || [];
+    container.innerHTML = '';
+    if (filters.length === 0) {
+        container.innerHTML = '<span style="font-size:0.83rem;color:var(--text-secondary);">差出人が未登録です。下のフォームから追加してください。</span>';
         return;
     }
-    mailList.innerHTML = '';
+    filters.forEach((f, i) => {
+        const isActive = i === selectedMailFilterIdx;
+        const tab = document.createElement('div');
+        tab.className = `mail-addr-tab${isActive ? ' active' : ''}${f.inBody ? ' forwarded' : ''}`;
+        tab.innerHTML = `
+            <span class="tab-label" onclick="selectMailFilter(${i})">
+                ${f.inBody ? '<span class="chip-badge" style="margin-right:3px;">転送元</span>' : ''}
+                ${f.address.replace(/</g, '&lt;')}
+            </span>
+            <button class="tab-delete" onclick="removeMailFromFilter(${i})" aria-label="削除">×</button>
+        `;
+        container.appendChild(tab);
+    });
+}
+
+function renderMailFeed(messages) {
+    const feed = document.getElementById('mail-feed');
+    if (!feed) return;
+    if (!messages || messages.length === 0) {
+        feed.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
+        return;
+    }
+    feed.innerHTML = '';
     messages.forEach(msg => {
         const headers = (msg.payload && msg.payload.headers) || [];
         const subject = getMailHeader(headers, 'Subject') || '(件名なし)';
         const from = getMailHeader(headers, 'From') || '';
         const dateRaw = getMailHeader(headers, 'Date');
-        let dateStr = '';
-        try { dateStr = new Date(dateRaw).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch {}
+        let dateStr = '', timeStr = '';
+        try {
+            const d = new Date(dateRaw);
+            dateStr = d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' });
+            timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+        } catch {}
         const snippet = msg.snippet ? msg.snippet.replace(/</g, '&lt;') : '';
-        const item = document.createElement('div');
-        item.className = 'mail-item';
-        item.dataset.id = msg.id;
-        item.innerHTML = `
-            <div class="mail-item-subject">${subject.replace(/</g, '&lt;')}</div>
-            <div class="mail-item-meta">
-                <span class="mail-from">${from.replace(/</g, '&lt;')}</span>
-                <span class="mail-date">${dateStr}</span>
+        const card = document.createElement('div');
+        card.className = 'mail-feed-card';
+        card.innerHTML = `
+            <div class="mail-feed-header">
+                <span class="mail-feed-date">${dateStr}</span>
+                <span class="mail-feed-time">${timeStr}</span>
             </div>
-            ${snippet ? `<div class="mail-snippet">${snippet}</div>` : ''}
+            <div class="mail-feed-subject">${subject.replace(/</g, '&lt;')}</div>
+            ${snippet ? `<div class="mail-feed-snippet">${snippet}</div>` : ''}
         `;
-        item.addEventListener('click', () => loadMailBody(msg.id, subject, from, dateStr));
-        mailList.appendChild(item);
+        card.addEventListener('click', () => loadMailBody(msg.id, subject, from, `${dateStr} ${timeStr}`));
+        feed.appendChild(card);
     });
+}
+
+async function selectMailFilter(idx) {
+    selectedMailFilterIdx = idx;
+    renderMailAddressTabs();
+    closeMailDetail();
+    const filters = state.settings.mailFromFilters || [];
+    const filter = filters[idx];
+    if (!filter) return;
+    const cacheKey = `${filter.address}:${filter.inBody}`;
+    const cached = mailCache[cacheKey];
+    if (cached) {
+        renderMailFeed(cached.messages);
+    } else {
+        await fetchGmailMessages();
+    }
 }
 
 async function loadMailBody(msgId, subject, from, dateStr) {
@@ -1349,27 +1389,6 @@ function closeMailDetail() {
     if (panel) panel.style.display = 'none';
 }
 
-function renderMailFromChips() {
-    const container = document.getElementById('mail-from-chips');
-    if (!container) return;
-    const filters = state.settings.mailFromFilters || [];
-    if (filters.length === 0) {
-        container.innerHTML = '<span style="font-size:0.8rem;color:var(--text-secondary);">差出人が未設定です</span>';
-        return;
-    }
-    container.innerHTML = '';
-    filters.forEach((f, i) => {
-        const chip = document.createElement('div');
-        chip.className = `mail-filter-chip${f.inBody ? ' forwarded' : ''}`;
-        chip.innerHTML = `
-            ${f.inBody ? '<span class="chip-badge">転送元</span>' : ''}
-            <span>${f.address.replace(/</g, '&lt;')}</span>
-            <button onclick="removeMailFromFilter(${i})" aria-label="削除">×</button>
-        `;
-        container.appendChild(chip);
-    });
-}
-
 function addMailFromFilter(inBody) {
     const input = document.getElementById('mail-from-add-input');
     if (!input) return;
@@ -1382,22 +1401,35 @@ function addMailFromFilter(inBody) {
     }
     state.settings.mailFromFilters.push({ address, inBody });
     saveData();
-    renderMailFromChips();
+    renderMailAddressTabs();
     input.value = '';
 }
 
 function removeMailFromFilter(index) {
     if (!state.settings.mailFromFilters) return;
     state.settings.mailFromFilters.splice(index, 1);
+    if (selectedMailFilterIdx === index) {
+        selectedMailFilterIdx = -1;
+        const feed = document.getElementById('mail-feed');
+        if (feed) feed.innerHTML = '<p class="empty-state">差出人を選択してください。</p>';
+        closeMailDetail();
+    } else if (selectedMailFilterIdx > index) {
+        selectedMailFilterIdx--;
+    }
     saveData();
-    renderMailFromChips();
+    renderMailAddressTabs();
 }
 
 async function fetchGmailMessages() {
-    const mailList = document.getElementById('mail-list');
-    if (!mailList) return;
+    const feed = document.getElementById('mail-feed');
+    if (!feed) return;
     if (!gapiInited || !gisInited) {
-        mailList.innerHTML = '<p class="empty-state">Google APIが初期化されていません。設定を確認してください。</p>';
+        feed.innerHTML = '<p class="empty-state">Google APIが初期化されていません。設定を確認してください。</p>';
+        return;
+    }
+    const filters = state.settings.mailFromFilters || [];
+    if (selectedMailFilterIdx < 0 || selectedMailFilterIdx >= filters.length) {
+        feed.innerHTML = '<p class="empty-state">差出人タブを選択してください。</p>';
         return;
     }
     if (gapi.client.getToken() === null) {
@@ -1405,30 +1437,20 @@ async function fetchGmailMessages() {
         tokenClient.requestAccessToken({ prompt: '' });
         return;
     }
-    const toVal = ((document.getElementById('mail-to-input') || {}).value || '').trim();
-    state.settings.mailToFilter = toVal;
-    saveData();
-    mailList.innerHTML = '<p class="empty-state" style="opacity:0.6;">読み込み中...</p>';
+    const filter = filters[selectedMailFilterIdx];
+    const cacheKey = `${filter.address}:${filter.inBody}`;
+    feed.innerHTML = '<p class="empty-state" style="opacity:0.6;">読み込み中...</p>';
     closeMailDetail();
     try {
-        const filters = state.settings.mailFromFilters || [];
-        const fromParts = filters.map(f => f.inBody ? `"${f.address}"` : `from:${f.address}`);
-        let query = '';
-        if (fromParts.length === 1) {
-            query = fromParts[0];
-        } else if (fromParts.length > 1) {
-            query = `(${fromParts.join(' OR ')})`;
-        }
-        if (toVal) query += ` to:${toVal}`;
-        const params = { maxResults: 20 };
-        if (query.trim()) params.q = query.trim();
+        const query = filter.inBody ? `"${filter.address}"` : `from:${filter.address}`;
         const listResp = await gapi.client.request({
             path: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-            params
+            params: { q: query, maxResults: 20 }
         });
         const messages = listResp.result.messages;
         if (!messages || messages.length === 0) {
-            mailList.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
+            mailCache[cacheKey] = { messages: [], fetchedAt: Date.now() };
+            feed.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
             return;
         }
         const metaResps = await Promise.all(
@@ -1437,7 +1459,9 @@ async function fetchGmailMessages() {
                 params: { format: 'metadata' }
             }))
         );
-        renderMailList(metaResps.map(r => r.result));
+        const result = metaResps.map(r => r.result);
+        mailCache[cacheKey] = { messages: result, fetchedAt: Date.now() };
+        renderMailFeed(result);
     } catch (err) {
         console.error('[Gmail]', err);
         const status = err.status || (err.result && err.result.error && err.result.error.code);
@@ -1445,7 +1469,7 @@ async function fetchGmailMessages() {
             authCallback = fetchGmailMessages;
             tokenClient.requestAccessToken({ prompt: 'consent' });
         } else {
-            mailList.innerHTML = `<p class="empty-state">エラー: ${(err.message || '取得に失敗しました').replace(/</g, '&lt;')}</p>`;
+            feed.innerHTML = `<p class="empty-state">エラー: ${(err.message || '取得に失敗しました').replace(/</g, '&lt;')}</p>`;
         }
     }
 }

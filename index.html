@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=13">
+    <link rel="stylesheet" href="style.css?v=14">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -324,7 +324,7 @@
                 <header class="view-header">
                     <div>
                         <h1>メール</h1>
-                        <p class="subtitle">指定した差出人からの受信メールを確認</p>
+                        <p class="subtitle">差出人ごとのメールタイムライン</p>
                     </div>
                     <button id="btn-fetch-mail" class="btn secondary">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
@@ -332,33 +332,29 @@
                     </button>
                 </header>
                 <div class="content-grid" style="grid-template-columns: 1fr;">
-                    <div class="panel">
-                        <h3>差出人フィルター</h3>
-                        <p class="help-text" style="margin-bottom:0.75rem;">アドレスを入力して追加してください。転送メールの元の送信元は「転送元として追加」を使用します。</p>
-                        <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+
+                    <!-- Address tabs + add form -->
+                    <div class="panel" style="margin-bottom:0.75rem;">
+                        <div id="mail-address-tabs" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1rem; min-height:36px; align-items:center;"></div>
+                        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; padding-top:0.85rem; border-top:1px solid var(--panel-border);">
                             <div class="input-group" style="flex:1; min-width:180px; margin-bottom:0;">
-                                <input type="email" id="mail-from-add-input" placeholder="例: notice@example.com">
+                                <input type="email" id="mail-from-add-input" placeholder="差出人を追加: notice@example.com">
                             </div>
-                            <button id="btn-add-from-normal" class="btn secondary" style="white-space:nowrap; padding:0.65rem 0.9rem; font-size:0.85rem;">+ 差出人として追加</button>
-                            <button id="btn-add-from-forward" class="btn secondary" style="white-space:nowrap; padding:0.65rem 0.9rem; font-size:0.85rem; border-color:#f59e0b; color:#f59e0b;">+ 転送元として追加</button>
+                            <button id="btn-add-from-normal" class="btn secondary" style="white-space:nowrap; padding:0.6rem 0.85rem; font-size:0.85rem;">+ 差出人</button>
+                            <button id="btn-add-from-forward" class="btn secondary" style="white-space:nowrap; padding:0.6rem 0.85rem; font-size:0.85rem; border-color:#f59e0b; color:#f59e0b;">+ 転送元</button>
                         </div>
-                        <div id="mail-from-chips" style="display:flex; flex-wrap:wrap; gap:0.4rem; min-height:28px; margin-bottom:1rem; align-items:center;"></div>
-                        <div class="input-group" style="margin-bottom:1rem;">
-                            <label style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:4px; display:block;">受信先アドレス (To) — 任意</label>
-                            <input type="email" id="mail-to-input" placeholder="例: your@gmail.com">
-                        </div>
-                        <button id="btn-apply-mail-filter" class="btn primary" style="width:100%;">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                            この条件でメールを検索
-                        </button>
-                        <p class="help-text" style="margin-top:0.75rem; margin-bottom:0;">初回使用時はGmailの閲覧権限の許可が必要です。</p>
+                        <p class="help-text" style="margin-top:0.65rem; margin-bottom:0;">初回使用時はGmailの閲覧権限の許可が必要です。</p>
                     </div>
-                    <div class="panel" id="mail-list-panel">
-                        <h3>受信メール <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:400;">(最新20件)</span></h3>
-                        <div id="mail-list">
-                            <p class="empty-state">上のフィルターを設定して検索してください。</p>
+
+                    <!-- Mail feed -->
+                    <div class="panel">
+                        <h3 style="margin-bottom:1rem;">受信メール <span style="font-size:0.8rem; color:var(--text-secondary); font-weight:400;">(最新20件)</span></h3>
+                        <div id="mail-feed" class="mail-feed-scroll">
+                            <p class="empty-state">上の差出人タブを選択してください。</p>
                         </div>
                     </div>
+
+                    <!-- Mail detail -->
                     <div class="panel" id="mail-detail-panel" style="display:none;">
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; margin-bottom:0.75rem;">
                             <h3 id="mail-detail-subject" style="margin:0; flex:1; word-break:break-word; font-size:1rem; line-height:1.4;"></h3>
@@ -505,6 +501,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=38"></script>
+    <script src="app.js?v=39"></script>
 </body>
 </html>

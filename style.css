@@ -919,34 +919,52 @@ textarea {
     opacity: 0.5;
 }
 
-.mail-filter-chip {
+/* Mail address tabs */
+.mail-addr-tab {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    background: rgba(99, 102, 241, 0.12);
-    border: 1px solid rgba(99, 102, 241, 0.35);
+    padding: 0.38rem 0.45rem 0.38rem 0.8rem;
     border-radius: 20px;
-    padding: 0.22rem 0.45rem 0.22rem 0.7rem;
-    font-size: 0.82rem;
+    border: 1px solid var(--panel-border);
+    background: rgba(255,255,255,0.04);
+    font-size: 0.83rem;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.mail-addr-tab:hover {
+    border-color: var(--primary-color);
     color: var(--text-primary);
+    background: rgba(99,102,241,0.08);
 }
-.mail-filter-chip.forwarded {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.4);
+.mail-addr-tab.active {
+    border-color: var(--primary-color);
+    background: rgba(99,102,241,0.18);
+    color: var(--primary-color);
+    font-weight: 600;
 }
-.mail-filter-chip button {
+.mail-addr-tab.forwarded { border-color: rgba(245,158,11,0.35); }
+.mail-addr-tab.forwarded.active {
+    border-color: #f59e0b;
+    background: rgba(245,158,11,0.15);
+    color: #f59e0b;
+}
+.tab-label { cursor: pointer; }
+.tab-delete {
     background: none;
     border: none;
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 1.05rem;
+    font-size: 1rem;
+    padding: 0 0.1rem;
     line-height: 1;
-    padding: 0 0.15rem;
-    display: flex;
-    align-items: center;
-    transition: color 0.15s;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
 }
-.mail-filter-chip button:hover { color: var(--danger-color); }
+.mail-addr-tab:hover .tab-delete { opacity: 1; }
+.tab-delete:hover { color: var(--danger-color); }
+
 .chip-badge {
     background: rgba(245, 158, 11, 0.25);
     border-radius: 3px;
@@ -956,7 +974,13 @@ textarea {
     white-space: nowrap;
 }
 
-.mail-item {
+/* Mail feed */
+.mail-feed-scroll {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+.mail-feed-card {
     padding: 0.85rem 1rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--panel-border);
@@ -965,44 +989,40 @@ textarea {
     transition: background 0.15s, border-color 0.15s;
     background: rgba(255,255,255,0.03);
 }
-.mail-item:hover {
+.mail-feed-card:hover {
     background: rgba(255,255,255,0.07);
     border-color: var(--primary-color);
 }
-.mail-item-subject {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.3rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.mail-item-meta {
+.mail-feed-header {
     display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
-    font-size: 0.78rem;
-    color: var(--text-secondary);
+    align-items: baseline;
+    gap: 0.55rem;
     margin-bottom: 0.3rem;
 }
-.mail-from {
+.mail-feed-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+.mail-feed-time {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+.mail-feed-subject {
+    font-size: 0.93rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
 }
-.mail-date {
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-.mail-snippet {
+.mail-feed-snippet {
     font-size: 0.8rem;
     color: var(--text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    opacity: 0.8;
+    opacity: 0.82;
 }
 
 .task-record-time {
