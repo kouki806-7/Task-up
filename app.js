@@ -54,6 +54,13 @@ function loadData() {
         }
         if (!state.settings.layoutMode) state.settings.layoutMode = 'auto';
         if (!state.settings.googleEmail) state.settings.googleEmail = null;
+        // Migrate single mailFromFilter string → mailFromFilters array
+        if (!state.settings.mailFromFilters) {
+            const old = state.settings.mailFromFilter || '';
+            state.settings.mailFromFilters = old ? [{ address: old, inBody: false }] : [];
+            delete state.settings.mailFromFilter;
+        }
+        if (state.settings.mailToFilter === undefined) state.settings.mailToFilter = '';
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
@@ -169,7 +176,7 @@ function getMonday(d) {
 // --- Google API ---
 let isSilentAuthAttempt = false;
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly';
 let tokenClient;
 let gapiInited = false;
 let gisInited = false;
@@ -882,6 +889,7 @@ function setupEventListeners() {
                     startTime: startStr,
                     endTime: endStr,
                     tag: 'record',
+                    taskTag: task.tag || 'タスク',
                     memo: `計測時間: ${formatTimer(totalSeconds)}`
                 });
 
@@ -976,6 +984,30 @@ function setupEventListeners() {
             }
         });
     }
+
+    const btnFetchMail = document.getElementById('btn-fetch-mail');
+    if (btnFetchMail) btnFetchMail.addEventListener('click', fetchGmailMessages);
+
+    const btnApplyMailFilter = document.getElementById('btn-apply-mail-filter');
+    if (btnApplyMailFilter) btnApplyMailFilter.addEventListener('click', fetchGmailMessages);
+
+    const btnAddFromNormal = document.getElementById('btn-add-from-normal');
+    if (btnAddFromNormal) btnAddFromNormal.addEventListener('click', () => addMailFromFilter(false));
+
+    const btnAddFromForward = document.getElementById('btn-add-from-forward');
+    if (btnAddFromForward) btnAddFromForward.addEventListener('click', () => addMailFromFilter(true));
+
+    const mailFromAddInput = document.getElementById('mail-from-add-input');
+    if (mailFromAddInput) {
+        mailFromAddInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); addMailFromFilter(false); }
+        });
+    }
+
+    const mailToInput = document.getElementById('mail-to-input');
+    if (mailToInput && state.settings.mailToFilter) mailToInput.value = state.settings.mailToFilter;
+
+    renderMailFromChips();
 }
 
 function applyLayoutMode() {
@@ -1198,6 +1230,223 @@ function autoSyncGoogleCalendar() {
         }
     } catch (e) {
         console.log('[Auto-sync] silent auth skipped or failed:', e);
+    }
+}
+
+// --- Gmail / Mail View ---
+function decodeBase64Url(str) {
+    try {
+        const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        const binary = atob(base64);
+        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+        return new TextDecoder('utf-8').decode(bytes);
+    } catch { return ''; }
+}
+
+function findMailPart(parts, mimeType) {
+    for (const p of parts) {
+        if (p.mimeType === mimeType) return p;
+        if (p.parts) { const f = findMailPart(p.parts, mimeType); if (f) return f; }
+    }
+    return null;
+}
+
+function extractMailBody(payload) {
+    if (!payload) return { type: 'plain', content: '' };
+    if (payload.body && payload.body.data) {
+        const type = (payload.mimeType || '').includes('html') ? 'html' : 'plain';
+        return { type, content: decodeBase64Url(payload.body.data) };
+    }
+    if (payload.parts) {
+        for (const [mime, type] of [['text/plain', 'plain'], ['text/html', 'html']]) {
+            const part = findMailPart(payload.parts, mime);
+            if (part && part.body && part.body.data) {
+                return { type, content: decodeBase64Url(part.body.data) };
+            }
+        }
+    }
+    return { type: 'plain', content: '(本文を取得できませんでした)' };
+}
+
+function getMailHeader(headers, name) {
+    const h = (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());
+    return h ? h.value : '';
+}
+
+function renderMailList(messages) {
+    const mailList = document.getElementById('mail-list');
+    if (!mailList) return;
+    if (!messages || messages.length === 0) {
+        mailList.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
+        return;
+    }
+    mailList.innerHTML = '';
+    messages.forEach(msg => {
+        const headers = (msg.payload && msg.payload.headers) || [];
+        const subject = getMailHeader(headers, 'Subject') || '(件名なし)';
+        const from = getMailHeader(headers, 'From') || '';
+        const dateRaw = getMailHeader(headers, 'Date');
+        let dateStr = '';
+        try { dateStr = new Date(dateRaw).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch {}
+        const snippet = msg.snippet ? msg.snippet.replace(/</g, '&lt;') : '';
+        const item = document.createElement('div');
+        item.className = 'mail-item';
+        item.dataset.id = msg.id;
+        item.innerHTML = `
+            <div class="mail-item-subject">${subject.replace(/</g, '&lt;')}</div>
+            <div class="mail-item-meta">
+                <span class="mail-from">${from.replace(/</g, '&lt;')}</span>
+                <span class="mail-date">${dateStr}</span>
+            </div>
+            ${snippet ? `<div class="mail-snippet">${snippet}</div>` : ''}
+        `;
+        item.addEventListener('click', () => loadMailBody(msg.id, subject, from, dateStr));
+        mailList.appendChild(item);
+    });
+}
+
+async function loadMailBody(msgId, subject, from, dateStr) {
+    const detailPanel = document.getElementById('mail-detail-panel');
+    const detailSubject = document.getElementById('mail-detail-subject');
+    const detailMeta = document.getElementById('mail-detail-meta');
+    const detailBody = document.getElementById('mail-detail-body');
+    if (!detailPanel) return;
+    detailSubject.textContent = subject;
+    detailMeta.innerHTML = `<strong>差出人:</strong> ${from.replace(/</g, '&lt;')}<br><strong>日時:</strong> ${dateStr}`;
+    detailBody.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;">読み込み中...</p>';
+    detailPanel.style.display = 'block';
+    detailPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try {
+        const resp = await gapi.client.request({
+            path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}`,
+            params: { format: 'full' }
+        });
+        const { type, content } = extractMailBody(resp.result.payload);
+        if (type === 'html') {
+            const iframe = document.createElement('iframe');
+            iframe.sandbox = 'allow-same-origin';
+            iframe.style.cssText = 'width:100%;border:none;border-radius:6px;background:#fff;display:block;';
+            iframe.style.minHeight = '200px';
+            detailBody.innerHTML = '';
+            detailBody.appendChild(iframe);
+            requestAnimationFrame(() => {
+                iframe.contentDocument.open();
+                iframe.contentDocument.write(content);
+                iframe.contentDocument.close();
+                setTimeout(() => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px'; }, 100);
+            });
+        } else {
+            detailBody.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-size:0.88rem;line-height:1.65;margin:0;">${content.replace(/</g, '&lt;')}</pre>`;
+        }
+    } catch (err) {
+        console.error('[Gmail body]', err);
+        detailBody.innerHTML = `<p style="color:var(--danger-color);">取得に失敗しました: ${err.message || ''}</p>`;
+    }
+}
+
+function closeMailDetail() {
+    const panel = document.getElementById('mail-detail-panel');
+    if (panel) panel.style.display = 'none';
+}
+
+function renderMailFromChips() {
+    const container = document.getElementById('mail-from-chips');
+    if (!container) return;
+    const filters = state.settings.mailFromFilters || [];
+    if (filters.length === 0) {
+        container.innerHTML = '<span style="font-size:0.8rem;color:var(--text-secondary);">差出人が未設定です</span>';
+        return;
+    }
+    container.innerHTML = '';
+    filters.forEach((f, i) => {
+        const chip = document.createElement('div');
+        chip.className = `mail-filter-chip${f.inBody ? ' forwarded' : ''}`;
+        chip.innerHTML = `
+            ${f.inBody ? '<span class="chip-badge">転送元</span>' : ''}
+            <span>${f.address.replace(/</g, '&lt;')}</span>
+            <button onclick="removeMailFromFilter(${i})" aria-label="削除">×</button>
+        `;
+        container.appendChild(chip);
+    });
+}
+
+function addMailFromFilter(inBody) {
+    const input = document.getElementById('mail-from-add-input');
+    if (!input) return;
+    const address = input.value.trim();
+    if (!address) return;
+    if (!state.settings.mailFromFilters) state.settings.mailFromFilters = [];
+    if (state.settings.mailFromFilters.some(f => f.address === address)) {
+        input.value = '';
+        return;
+    }
+    state.settings.mailFromFilters.push({ address, inBody });
+    saveData();
+    renderMailFromChips();
+    input.value = '';
+}
+
+function removeMailFromFilter(index) {
+    if (!state.settings.mailFromFilters) return;
+    state.settings.mailFromFilters.splice(index, 1);
+    saveData();
+    renderMailFromChips();
+}
+
+async function fetchGmailMessages() {
+    const mailList = document.getElementById('mail-list');
+    if (!mailList) return;
+    if (!gapiInited || !gisInited) {
+        mailList.innerHTML = '<p class="empty-state">Google APIが初期化されていません。設定を確認してください。</p>';
+        return;
+    }
+    if (gapi.client.getToken() === null) {
+        authCallback = fetchGmailMessages;
+        tokenClient.requestAccessToken({ prompt: '' });
+        return;
+    }
+    const toVal = ((document.getElementById('mail-to-input') || {}).value || '').trim();
+    state.settings.mailToFilter = toVal;
+    saveData();
+    mailList.innerHTML = '<p class="empty-state" style="opacity:0.6;">読み込み中...</p>';
+    closeMailDetail();
+    try {
+        const filters = state.settings.mailFromFilters || [];
+        const fromParts = filters.map(f => f.inBody ? `"${f.address}"` : `from:${f.address}`);
+        let query = '';
+        if (fromParts.length === 1) {
+            query = fromParts[0];
+        } else if (fromParts.length > 1) {
+            query = `(${fromParts.join(' OR ')})`;
+        }
+        if (toVal) query += ` to:${toVal}`;
+        const params = { maxResults: 20 };
+        if (query.trim()) params.q = query.trim();
+        const listResp = await gapi.client.request({
+            path: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
+            params
+        });
+        const messages = listResp.result.messages;
+        if (!messages || messages.length === 0) {
+            mailList.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
+            return;
+        }
+        const metaResps = await Promise.all(
+            messages.map(m => gapi.client.request({
+                path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`,
+                params: { format: 'metadata' }
+            }))
+        );
+        renderMailList(metaResps.map(r => r.result));
+    } catch (err) {
+        console.error('[Gmail]', err);
+        const status = err.status || (err.result && err.result.error && err.result.error.code);
+        if (status === 401 || status === 403) {
+            authCallback = fetchGmailMessages;
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+        } else {
+            mailList.innerHTML = `<p class="empty-state">エラー: ${(err.message || '取得に失敗しました').replace(/</g, '&lt;')}</p>`;
+        }
     }
 }
 
@@ -1601,18 +1850,32 @@ function renderStats(period) {
         }
     }
 
-    const tagCounts = { '講義':0, '勉強・課題':0, '趣味・遊び':0, 'タスク':0, 'カレンダー':0 };
+    const tagCounts = {};
     let totalMins = 0;
+    const dateSet = new Set(dates);
 
-    dates.forEach(dateStr => {
-        const h = state.history[dateStr];
-        if (h && h.durationByTag) {
-            Object.keys(h.durationByTag).forEach(tag => {
-                tagCounts[tag] = (tagCounts[tag] || 0) + h.durationByTag[tag];
-                totalMins += h.durationByTag[tag];
-            });
-        }
-    });
+    state.schedules
+        .filter(s => s.tag === 'record' && dateSet.has(s.date) && s.startTime && s.endTime)
+        .forEach(s => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            let startMin = sh * 60 + sm;
+            let endMin = eh * 60 + em;
+            if (endMin < startMin) endMin += 24 * 60;
+            const mins = endMin - startMin;
+            if (mins <= 0) return;
+
+            // Use stored taskTag, fall back to matching task by name, then 'タスク'
+            let tag = s.taskTag;
+            if (!tag) {
+                const taskName = s.title.replace(/^⏱\s*/, '');
+                const matched = state.tasks.find(t => t.text === taskName);
+                tag = (matched && matched.tag) ? matched.tag : 'タスク';
+            }
+
+            tagCounts[tag] = (tagCounts[tag] || 0) + mins;
+            totalMins += mins;
+        });
 
     // Achievement Rate
     let plannedTotal = 0;

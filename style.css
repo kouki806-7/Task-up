@@ -919,6 +919,92 @@ textarea {
     opacity: 0.5;
 }
 
+.mail-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    border-radius: 20px;
+    padding: 0.22rem 0.45rem 0.22rem 0.7rem;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+.mail-filter-chip.forwarded {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.4);
+}
+.mail-filter-chip button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+    line-height: 1;
+    padding: 0 0.15rem;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+}
+.mail-filter-chip button:hover { color: var(--danger-color); }
+.chip-badge {
+    background: rgba(245, 158, 11, 0.25);
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    font-size: 0.7rem;
+    color: #f59e0b;
+    white-space: nowrap;
+}
+
+.mail-item {
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--panel-border);
+    margin-bottom: 0.6rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    background: rgba(255,255,255,0.03);
+}
+.mail-item:hover {
+    background: rgba(255,255,255,0.07);
+    border-color: var(--primary-color);
+}
+.mail-item-subject {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.3rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mail-item-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+}
+.mail-from {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+.mail-date {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.mail-snippet {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.8;
+}
+
 .task-record-time {
     font-size: 0.68rem;
     color: #fb7185;
