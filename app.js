@@ -1399,6 +1399,11 @@ function renderMailFeed(messages) {
     });
 }
 
+function requestGmailAuth() {
+    authCallback = fetchGmailMessages;
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
 async function selectMailFilter(idx) {
     selectedMailFilterIdx = idx;
     renderMailAddressTabs();
@@ -1406,6 +1411,14 @@ async function selectMailFilter(idx) {
     const filters = state.settings.mailFromFilters || [];
     const filter = filters[idx];
     if (!filter) return;
+
+    // ユーザージェスチャー内でトークンがなければ即座に認証（awaitの前に呼ぶことでポップアップが許可される）
+    if (gapiInited && gisInited && gapi.client.getToken() === null) {
+        authCallback = fetchGmailMessages;
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+        return;
+    }
+
     const cacheKey = `${filter.address}:${filter.inBody}`;
     const cached = mailCache[cacheKey];
     if (cached) {
@@ -1502,11 +1515,6 @@ async function fetchGmailMessages() {
         feed.innerHTML = '<p class="empty-state">差出人タブを選択してください。</p>';
         return;
     }
-    if (gapi.client.getToken() === null) {
-        authCallback = fetchGmailMessages;
-        tokenClient.requestAccessToken({ prompt: '' });
-        return;
-    }
     const filter = filters[selectedMailFilterIdx];
     const cacheKey = `${filter.address}:${filter.inBody}`;
     feed.innerHTML = '<p class="empty-state" style="opacity:0.6;">メールを取得中...</p>';
@@ -1572,8 +1580,13 @@ async function fetchGmailMessages() {
         console.error('[Gmail]', err);
         const status = err.status || (err.result && err.result.error && err.result.error.code);
         if (status === 401 || status === 403) {
+            // ポップアップはユーザージェスチャーから呼ぶ必要があるのでボタンを表示
             authCallback = fetchGmailMessages;
-            tokenClient.requestAccessToken({ prompt: 'consent' });
+            feed.innerHTML = `
+                <div style="text-align:center; padding:2rem 1rem;">
+                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.95rem;">Gmailの閲覧権限が必要です。<br>以下のボタンをクリックして許可してください。</p>
+                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.75rem 2rem; font-size:1rem;">Gmailへのアクセスを許可する</button>
+                </div>`;
         } else {
             const msg = (err.message || '取得に失敗しました').replace(/</g, '&lt;');
             feed.innerHTML = `<p class="empty-state">エラー: ${msg}</p>`;
