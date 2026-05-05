@@ -1016,13 +1016,34 @@ textarea {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.mail-feed-snippet {
-    font-size: 0.8rem;
+.mail-feed-summary {
+    font-size: 0.82rem;
     color: var(--text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    opacity: 0.82;
+    line-height: 1.55;
+    margin-top: 0.3rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.mail-feed-summary.ai-upgraded {
+    color: var(--text-primary);
+    opacity: 0.9;
+}
+.summary-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: auto;
+    flex-shrink: 0;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+.summary-badge.ai {
+    background: rgba(99, 102, 241, 0.22);
+    color: var(--primary-color);
+}
+.summary-badge.keyword {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-secondary);
 }
 
 .task-record-time {

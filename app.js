@@ -1270,6 +1270,73 @@ function getMailHeader(headers, name) {
     return h ? h.value : '';
 }
 
+// --- Mail summarization (ported from LINE project summarize.js) ---
+const MAIL_IMPORTANT_PATTERNS = [
+    /締[切め]|期限|期日|〆切|デッドライン/,
+    /\d+月\d+日|\d+\/\d+|今月|来月|今週|来週|月曜|火曜|水曜|木曜|金曜|土曜|日曜/,
+    /\d+:\d+|午前|午後|朝|昼|夜/,
+    /提出|返信|回答|回覧|確認|対応|お願い|連絡|手続き|申請|登録|入力|送付|送信/,
+    /必要|重要|必須|至急|緊急|注意|お知らせ/,
+    /円|料金|費用|支払|振込|納付/,
+];
+
+function extractBodyText(payload) {
+    const { content } = extractMailBody(payload);
+    return content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function mailSplitSentences(text) {
+    return text
+        .replace(/\r\n/g, '\n')
+        .split(/[。！？\n]+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 8 && s.length < 200);
+}
+
+function mailScoreText(text) {
+    return MAIL_IMPORTANT_PATTERNS.filter(p => p.test(text)).length;
+}
+
+function extractKeywordSummary(subject, body) {
+    const lines = [];
+    if (mailScoreText(subject) > 0) lines.push(`【件名】${subject}`);
+    if (!body) return lines.length ? lines.join('\n') : `件名: ${subject}`;
+    const sentences = mailSplitSentences(body);
+    const scored = sentences
+        .map(s => ({ text: s, score: mailScoreText(s) }))
+        .filter(s => s.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+    scored.forEach(s => lines.push(s.text));
+    if (lines.length === 0) sentences.slice(0, 2).forEach(s => lines.push(s));
+    return lines.length ? lines.join('\n') : `件名: ${subject}（本文要約なし）`;
+}
+
+async function summarizeWithGemini(subject, bodyText) {
+    const apiKey = state.settings.apiKey;
+    if (!apiKey) throw new Error('no key');
+    const prompt = `以下のメールを日本語で3行以内に簡潔に要約してください。重要な締切・日時・必要なアクションがあれば必ず含めてください。\n\n件名: ${subject}\n\n本文:\n${bodyText.slice(0, 2500)}`;
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { maxOutputTokens: 200, temperature: 0.3 }
+            })
+        }
+    );
+    if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(`Gemini ${res.status}: ${(errData.error && errData.error.message) || ''}`);
+    }
+    const data = await res.json();
+    return (data.candidates && data.candidates[0] && data.candidates[0].content &&
+            data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
+            data.candidates[0].content.parts[0].text || '').trim();
+}
+
 function renderMailAddressTabs() {
     const container = document.getElementById('mail-address-tabs');
     if (!container) return;
@@ -1313,16 +1380,19 @@ function renderMailFeed(messages) {
             dateStr = d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' });
             timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
         } catch {}
-        const snippet = msg.snippet ? msg.snippet.replace(/</g, '&lt;') : '';
+        const summary = (msg._summary || '').replace(/</g, '&lt;');
+        const isAI = !!msg._summaryIsAI;
+        const safeId = msg.id.replace(/[^a-zA-Z0-9]/g, '');
         const card = document.createElement('div');
         card.className = 'mail-feed-card';
         card.innerHTML = `
             <div class="mail-feed-header">
                 <span class="mail-feed-date">${dateStr}</span>
                 <span class="mail-feed-time">${timeStr}</span>
+                ${summary ? `<span id="mbadge-${safeId}" class="summary-badge ${isAI ? 'ai' : 'keyword'}">${isAI ? 'AI' : '抽出'}</span>` : ''}
             </div>
             <div class="mail-feed-subject">${subject.replace(/</g, '&lt;')}</div>
-            ${snippet ? `<div class="mail-feed-snippet">${snippet}</div>` : ''}
+            ${summary ? `<div id="msum-${safeId}" class="mail-feed-summary">${summary}</div>` : ''}
         `;
         card.addEventListener('click', () => loadMailBody(msg.id, subject, from, `${dateStr} ${timeStr}`));
         feed.appendChild(card);
@@ -1439,7 +1509,7 @@ async function fetchGmailMessages() {
     }
     const filter = filters[selectedMailFilterIdx];
     const cacheKey = `${filter.address}:${filter.inBody}`;
-    feed.innerHTML = '<p class="empty-state" style="opacity:0.6;">読み込み中...</p>';
+    feed.innerHTML = '<p class="empty-state" style="opacity:0.6;">メールを取得中...</p>';
     closeMailDetail();
     try {
         const query = filter.inBody ? `"${filter.address}"` : `from:${filter.address}`;
@@ -1453,15 +1523,51 @@ async function fetchGmailMessages() {
             feed.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
             return;
         }
-        const metaResps = await Promise.all(
+
+        // Fetch full message bodies in parallel
+        feed.innerHTML = `<p class="empty-state" style="opacity:0.6;">${messages.length}件を取得・要約中...</p>`;
+        const fullResps = await Promise.all(
             messages.map(m => gapi.client.request({
                 path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`,
-                params: { format: 'metadata' }
+                params: { format: 'full' }
             }))
         );
-        const result = metaResps.map(r => r.result);
-        mailCache[cacheKey] = { messages: result, fetchedAt: Date.now() };
-        renderMailFeed(result);
+
+        // Extract body text and apply keyword summary immediately
+        const processed = fullResps.map(r => {
+            const msg = r.result;
+            const headers = (msg.payload && msg.payload.headers) || [];
+            const subject = getMailHeader(headers, 'Subject') || '';
+            const bodyText = extractBodyText(msg.payload);
+            return { ...msg, _subject: subject, _bodyText: bodyText, _summary: extractKeywordSummary(subject, bodyText), _summaryIsAI: false };
+        });
+
+        // Render immediately with keyword summaries
+        mailCache[cacheKey] = { messages: processed, fetchedAt: Date.now() };
+        renderMailFeed(processed);
+
+        // Progressively upgrade to AI summaries in background
+        processed.forEach(async msg => {
+            try {
+                const aiSummary = await summarizeWithGemini(msg._subject, msg._bodyText);
+                if (!aiSummary) return;
+                // Update cache entry
+                const cached = mailCache[cacheKey];
+                if (cached) {
+                    const m = cached.messages.find(m => m.id === msg.id);
+                    if (m) { m._summary = aiSummary; m._summaryIsAI = true; }
+                }
+                // Update DOM if card still visible
+                const safeId = msg.id.replace(/[^a-zA-Z0-9]/g, '');
+                const sumEl = document.getElementById(`msum-${safeId}`);
+                const badgeEl = document.getElementById(`mbadge-${safeId}`);
+                if (sumEl) { sumEl.textContent = aiSummary; sumEl.classList.add('ai-upgraded'); }
+                if (badgeEl) { badgeEl.textContent = 'AI'; badgeEl.className = 'summary-badge ai'; }
+            } catch (e) {
+                // Gemini unavailable — keyword summary stays
+            }
+        });
+
     } catch (err) {
         console.error('[Gmail]', err);
         const status = err.status || (err.result && err.result.error && err.result.error.code);
