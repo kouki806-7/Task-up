@@ -1524,47 +1524,47 @@ async function fetchGmailMessages() {
             return;
         }
 
-        // Fetch full message bodies in parallel
-        feed.innerHTML = `<p class="empty-state" style="opacity:0.6;">${messages.length}件を取得・要約中...</p>`;
-        const fullResps = await Promise.all(
+        // Step 1: fetch metadata for all → immediate display using snippet
+        const metaResps = await Promise.allSettled(
             messages.map(m => gapi.client.request({
                 path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`,
-                params: { format: 'full' }
+                params: { format: 'metadata' }
             }))
         );
+        const processed = metaResps
+            .filter(r => r.status === 'fulfilled')
+            .map(r => {
+                const msg = r.value.result;
+                const headers = (msg.payload && msg.payload.headers) || [];
+                const subject = getMailHeader(headers, 'Subject') || '';
+                return { ...msg, _subject: subject, _bodyText: '', _summary: msg.snippet || '', _summaryIsAI: false };
+            });
 
-        // Extract body text and apply keyword summary immediately
-        const processed = fullResps.map(r => {
-            const msg = r.result;
-            const headers = (msg.payload && msg.payload.headers) || [];
-            const subject = getMailHeader(headers, 'Subject') || '';
-            const bodyText = extractBodyText(msg.payload);
-            return { ...msg, _subject: subject, _bodyText: bodyText, _summary: extractKeywordSummary(subject, bodyText), _summaryIsAI: false };
-        });
+        if (processed.length === 0) {
+            feed.innerHTML = '<p class="empty-state">メールの取得に失敗しました。</p>';
+            return;
+        }
 
-        // Render immediately with keyword summaries
         mailCache[cacheKey] = { messages: processed, fetchedAt: Date.now() };
         renderMailFeed(processed);
 
-        // Progressively upgrade to AI summaries in background
+        // Step 2: background — fetch full body per message → keyword → AI
         processed.forEach(async msg => {
             try {
-                const aiSummary = await summarizeWithGemini(msg._subject, msg._bodyText);
-                if (!aiSummary) return;
-                // Update cache entry
-                const cached = mailCache[cacheKey];
-                if (cached) {
-                    const m = cached.messages.find(m => m.id === msg.id);
-                    if (m) { m._summary = aiSummary; m._summaryIsAI = true; }
-                }
-                // Update DOM if card still visible
-                const safeId = msg.id.replace(/[^a-zA-Z0-9]/g, '');
-                const sumEl = document.getElementById(`msum-${safeId}`);
-                const badgeEl = document.getElementById(`mbadge-${safeId}`);
-                if (sumEl) { sumEl.textContent = aiSummary; sumEl.classList.add('ai-upgraded'); }
-                if (badgeEl) { badgeEl.textContent = 'AI'; badgeEl.className = 'summary-badge ai'; }
+                const fullResp = await gapi.client.request({
+                    path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+                    params: { format: 'full' }
+                });
+                const bodyText = extractBodyText(fullResp.result.payload);
+                msg._bodyText = bodyText;
+                const keywordSummary = extractKeywordSummary(msg._subject, bodyText);
+                updateMailCard(msg.id, keywordSummary, false, cacheKey);
+
+                // Try Gemini upgrade
+                const aiSummary = await summarizeWithGemini(msg._subject, bodyText);
+                if (aiSummary) updateMailCard(msg.id, aiSummary, true, cacheKey);
             } catch (e) {
-                // Gemini unavailable — keyword summary stays
+                // Keep snippet or keyword summary
             }
         });
 
@@ -1575,9 +1575,23 @@ async function fetchGmailMessages() {
             authCallback = fetchGmailMessages;
             tokenClient.requestAccessToken({ prompt: 'consent' });
         } else {
-            feed.innerHTML = `<p class="empty-state">エラー: ${(err.message || '取得に失敗しました').replace(/</g, '&lt;')}</p>`;
+            const msg = (err.message || '取得に失敗しました').replace(/</g, '&lt;');
+            feed.innerHTML = `<p class="empty-state">エラー: ${msg}</p>`;
         }
     }
+}
+
+function updateMailCard(msgId, summary, isAI, cacheKey) {
+    const cached = mailCache[cacheKey];
+    if (cached) {
+        const m = cached.messages.find(m => m.id === msgId);
+        if (m) { m._summary = summary; m._summaryIsAI = isAI; }
+    }
+    const safeId = msgId.replace(/[^a-zA-Z0-9]/g, '');
+    const sumEl = document.getElementById(`msum-${safeId}`);
+    const badgeEl = document.getElementById(`mbadge-${safeId}`);
+    if (sumEl) { sumEl.textContent = summary; if (isAI) sumEl.classList.add('ai-upgraded'); }
+    if (badgeEl) { badgeEl.textContent = isAI ? 'AI' : '抽出'; badgeEl.className = `summary-badge ${isAI ? 'ai' : 'keyword'}`; }
 }
 
 // --- Memo (タスク未満) ---
