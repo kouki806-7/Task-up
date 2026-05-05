@@ -358,6 +358,7 @@ function syncTimerUI() {
         if (btnTimerReset) btnTimerReset.style.display = 'block';
         updateTimerDisplay();
     } else {
+        timerSelect.disabled = false;
         btnTimerStart.innerHTML = '▶ 開始';
         btnTimerStart.classList.replace('secondary', 'primary');
         btnTimerPause.style.display = 'none';
