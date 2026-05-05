@@ -872,12 +872,7 @@ function setupEventListeners() {
                 const startStr = `${startD.getHours().toString().padStart(2, '0')}:${startD.getMinutes().toString().padStart(2, '0')}`;
                 const endStr = `${endD.getHours().toString().padStart(2, '0')}:${endD.getMinutes().toString().padStart(2, '0')}`;
 
-                let dateStr = getTodayString();
-                if (now.getHours() < 5) {
-                    const prevDay = new Date(now);
-                    prevDay.setDate(prevDay.getDate() - 1);
-                    dateStr = prevDay.toLocaleDateString('en-CA');
-                }
+                const dateStr = getTodayString();
 
                 state.schedules.push({
                     id: generateId(),
