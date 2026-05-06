@@ -68,6 +68,7 @@ function loadData() {
         if (!state.timer) {
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
         }
+        if (!state.pausedTimers) state.pausedTimers = [];
     }
     
     // Check for new day
@@ -356,7 +357,7 @@ function syncTimerUI() {
         runTimerInterval();
     } else if (state.timer.accumulatedSeconds > 0) {
         timerSelect.value = state.timer.taskId;
-        timerSelect.disabled = true;
+        timerSelect.disabled = false;
         btnTimerStart.innerHTML = '▶ 再開';
         btnTimerStart.classList.replace('secondary', 'primary');
         btnTimerPause.style.display = 'none';
@@ -373,6 +374,57 @@ function syncTimerUI() {
         if (btnTimerReset) btnTimerReset.style.display = 'none';
         updateTimerDisplay();
     }
+    renderPausedTimers();
+}
+
+function renderPausedTimers() {
+    const container = document.getElementById('paused-timers-list');
+    if (!container) return;
+    if (!state.pausedTimers || state.pausedTimers.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    const items = state.pausedTimers.map(pt => {
+        const task = state.tasks.find(t => t.id === pt.taskId);
+        const name = task ? task.text : '(削除済みタスク)';
+        return `<div class="paused-timer-item" onclick="resumePausedTimer('${pt.taskId}')">
+            <span class="paused-timer-name">⏸ ${name}</span>
+            <span class="paused-timer-time">${formatTimer(pt.accumulatedSeconds)}</span>
+        </div>`;
+    }).join('');
+    container.innerHTML = `<p class="paused-timers-label">一時停止中のタスク</p>${items}`;
+}
+
+function stashCurrentTimer() {
+    if (!state.timer.taskId || state.timer.accumulatedSeconds <= 0) return;
+    const idx = state.pausedTimers.findIndex(t => t.taskId === state.timer.taskId);
+    if (idx >= 0) {
+        state.pausedTimers[idx].accumulatedSeconds = state.timer.accumulatedSeconds;
+    } else {
+        state.pausedTimers.push({ taskId: state.timer.taskId, accumulatedSeconds: state.timer.accumulatedSeconds });
+    }
+}
+
+function resumePausedTimer(taskId) {
+    if (state.timer.isRunning) {
+        const elapsed = Math.floor((Date.now() - state.timer.startTime) / 1000);
+        state.timer.accumulatedSeconds += elapsed;
+        state.timer.isRunning = false;
+        state.timer.startTime = null;
+        if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+        stashCurrentTimer();
+    } else if (state.timer.taskId && state.timer.taskId !== taskId && state.timer.accumulatedSeconds > 0) {
+        stashCurrentTimer();
+    }
+    const idx = state.pausedTimers.findIndex(t => t.taskId === taskId);
+    state.timer.accumulatedSeconds = idx >= 0 ? state.pausedTimers.splice(idx, 1)[0].accumulatedSeconds : 0;
+    state.timer.taskId = taskId;
+    state.timer.isRunning = true;
+    state.timer.startTime = Date.now();
+    updateTimerSelect();
+    timerSelect.value = taskId;
+    saveData();
+    syncTimerUI();
 }
 
 // --- Firebase Sync ---
@@ -436,6 +488,7 @@ async function fetchCloudData() {
                 if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
                 state.timer = cloudState.timer;
             }
+            state.pausedTimers = cloudState.pausedTimers || [];
             state.memos = cloudState.memos || [];
 
             // Re-render views
@@ -475,6 +528,7 @@ async function saveToCloud() {
             lastDate: state.lastDate,
             settings: state.settings,
             timer: state.timer,
+            pausedTimers: state.pausedTimers,
             memos: state.memos
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
@@ -809,36 +863,58 @@ function setupEventListeners() {
     }
 
     // Timer Handlers
+    if (timerSelect) {
+        timerSelect.addEventListener('change', () => {
+            const newTaskId = timerSelect.value;
+            if (!newTaskId || newTaskId === state.timer.taskId || state.timer.isRunning) return;
+            stashCurrentTimer();
+            const idx = state.pausedTimers.findIndex(t => t.taskId === newTaskId);
+            state.timer.accumulatedSeconds = idx >= 0 ? state.pausedTimers.splice(idx, 1)[0].accumulatedSeconds : 0;
+            state.timer.taskId = newTaskId;
+            state.timer.isRunning = false;
+            saveData();
+            updateTimerDisplay();
+            renderPausedTimers();
+            if (state.timer.accumulatedSeconds > 0) {
+                btnTimerStart.innerHTML = '▶ 再開';
+                btnTimerFinish.disabled = false;
+                btnTimerCancel.style.display = 'block';
+                if (btnTimerReset) btnTimerReset.style.display = 'block';
+            } else {
+                btnTimerStart.innerHTML = '▶ 開始';
+                btnTimerFinish.disabled = true;
+                btnTimerCancel.style.display = 'none';
+                if (btnTimerReset) btnTimerReset.style.display = 'none';
+            }
+            btnTimerStart.classList.replace('secondary', 'primary');
+        });
+    }
+
     if (btnTimerStart) {
         btnTimerStart.addEventListener('click', () => {
             const taskId = timerSelect.value;
             if (!taskId) return alert("タスクを選択してください");
-            
-            // Toggle Logic
+
             if (state.timer.isRunning) {
-                // Pause action
+                // Pause
                 const elapsed = Math.floor((Date.now() - state.timer.startTime) / 1000);
                 state.timer.accumulatedSeconds += elapsed;
                 state.timer.isRunning = false;
                 state.timer.startTime = null;
+                if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
                 saveData();
-                
-                if (timerInterval) clearInterval(timerInterval);
-                timerInterval = null;
-                
                 syncTimerUI();
             } else {
-                // Start/Resume action
-                // If the task has changed, reset the accumulated time to avoid lingering bugs
+                // Start/Resume — task switching via change handler, but handle fallback
                 if (state.timer.taskId !== taskId) {
-                    state.timer.accumulatedSeconds = 0;
+                    stashCurrentTimer();
+                    const idx = state.pausedTimers.findIndex(t => t.taskId === taskId);
+                    state.timer.accumulatedSeconds = idx >= 0 ? state.pausedTimers.splice(idx, 1)[0].accumulatedSeconds : 0;
                     state.timer.taskId = taskId;
                 }
-                
                 state.timer.isRunning = true;
                 state.timer.startTime = Date.now();
                 saveData();
-                
                 syncTimerUI();
             }
         });
@@ -905,6 +981,7 @@ function setupEventListeners() {
 
             saveData();
             syncTimerUI();
+            renderPausedTimers();
 
             if (document.getElementById('view-schedule').classList.contains('active')) {
                 renderWeeklySchedule();
@@ -925,7 +1002,7 @@ function setupEventListeners() {
             timerInterval = null;
             
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
-            
+
             timerDisplay.textContent = '00:00:00';
             timerSelect.disabled = false;
             timerSelect.value = '';
@@ -934,8 +1011,9 @@ function setupEventListeners() {
             btnTimerStart.textContent = '▶ 開始';
             btnTimerFinish.disabled = true;
             btnTimerCancel.style.display = 'none';
-            
+
             saveData();
+            renderPausedTimers();
         });
     }
 
@@ -948,7 +1026,6 @@ function setupEventListeners() {
             state.timer = { taskId: currentTaskId, startTime: null, isRunning: false, accumulatedSeconds: 0 };
 
             saveData();
-            // syncTimerUI shows idle state but keeps task in dropdown
             timerSelect.disabled = false;
             btnTimerFinish.disabled = true;
             btnTimerCancel.style.display = 'none';
@@ -958,6 +1035,7 @@ function setupEventListeners() {
             timerDisplay.textContent = '00:00:00';
             updateTimerSelect();
             if (currentTaskId) timerSelect.value = currentTaskId;
+            renderPausedTimers();
         });
     }
 
@@ -1206,25 +1284,8 @@ async function fetchGoogleCalendarEvents(silent = false) {
 // Works when the user has previously granted consent and the session is still alive.
 function autoSyncGoogleCalendar() {
     if (!gapiInited || !gisInited) return;
-
-    authCallback = () => fetchGoogleCalendarEvents(true);
-
-    try {
-        if (gapi.client.getToken() !== null) {
-            fetchGoogleCalendarEvents(true);
-        } else {
-            // Use prompt: 'none' for a completely silent attempt. 
-            // Requires a valid session in the browser.
-            const options = { prompt: 'none' };
-            if (state.settings.googleEmail) {
-                options.login_hint = state.settings.googleEmail;
-            }
-            isSilentAuthAttempt = true;
-            tokenClient.requestAccessToken(options);
-        }
-    } catch (e) {
-        console.log('[Auto-sync] silent auth skipped or failed:', e);
-    }
+    if (gapi.client.getToken() === null) return;
+    fetchGoogleCalendarEvents(true);
 }
 
 // --- Gmail / Mail View ---
@@ -1580,12 +1641,28 @@ async function fetchGmailMessages() {
         console.error('[Gmail]', err);
         const status = err.status || (err.result && err.result.error && err.result.error.code);
         if (status === 401 || status === 403) {
-            // ポップアップはユーザージェスチャーから呼ぶ必要があるのでボタンを表示
+            const token = gapi.client.getToken();
+            const grantedScopes = token ? (token.scope || '') : '';
+            const hasGmail = grantedScopes.includes('gmail.readonly');
+            console.log('[Gmail auth] granted scopes:', grantedScopes);
             authCallback = fetchGmailMessages;
             feed.innerHTML = `
-                <div style="text-align:center; padding:2rem 1rem;">
-                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.95rem;">Gmailの閲覧権限が必要です。<br>以下のボタンをクリックして許可してください。</p>
-                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.75rem 2rem; font-size:1rem;">Gmailへのアクセスを許可する</button>
+                <div style="padding:1.5rem; font-size:0.9rem; line-height:1.7;">
+                    <p style="color:var(--danger-color); font-weight:600; margin-bottom:0.75rem;">⚠ Gmail APIアクセスエラー (403)</p>
+                    <p style="color:var(--text-secondary); margin-bottom:0.5rem;">付与済みスコープ: <code style="font-size:0.8rem; background:rgba(0,0,0,0.3); padding:0.1rem 0.4rem; border-radius:3px;">${grantedScopes || '(なし)'}</code></p>
+                    <p style="color:var(--text-secondary); margin-bottom:1rem;">gmail.readonly: <strong style="color:${hasGmail ? 'var(--success-color)' : 'var(--danger-color)'};">${hasGmail ? '✓ 付与済み' : '✗ 未付与'}</strong></p>
+                    ${!hasGmail ? `
+                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.85rem;">
+                        Google Cloud Console で以下の設定が必要です：<br>
+                        ① Gmail API を有効化<br>
+                        ② OAuth同意画面 → スコープに <code>gmail.readonly</code> を追加<br>
+                        ③ テストユーザーに自分のアドレスを追加
+                    </p>
+                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.65rem 1.5rem;">再度アクセスを許可する</button>
+                    ` : `
+                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.85rem;">スコープは付与済みですが拒否されています。Gmail APIが有効か確認してください。</p>
+                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.65rem 1.5rem;">再認証する</button>
+                    `}
                 </div>`;
         } else {
             const msg = (err.message || '取得に失敗しました').replace(/</g, '&lt;');

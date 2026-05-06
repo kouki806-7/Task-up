@@ -1255,3 +1255,42 @@ textarea {
     animation: timerFlash 0.65s ease-out forwards;
 }
 
+/* Paused timers list */
+.paused-timers-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 0.5rem;
+}
+.paused-timer-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.7rem 1rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    margin-bottom: 0.4rem;
+    transition: border-color 0.15s, background 0.15s;
+}
+.paused-timer-item:hover {
+    border-color: var(--primary-color);
+    background: rgba(99,102,241,0.08);
+}
+.paused-timer-name {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 70%;
+}
+.paused-timer-time {
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+

@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=15">
+    <link rel="stylesheet" href="style.css?v=16">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -179,6 +179,7 @@
                         <div id="btn-timer-pause" style="display:none;"></div> <!-- Legacy hidden element for JS compatibility -->
                     </div>
                 </div>
+                <div id="paused-timers-list" style="max-width: 600px; margin: 0.75rem auto 0;"></div>
             </section>
 
             <!-- Schedule View -->
@@ -501,6 +502,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=42"></script>
+    <script src="app.js?v=45"></script>
 </body>
 </html>
