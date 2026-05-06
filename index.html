@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=16">
+    <link rel="stylesheet" href="style.css?v=18">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -317,6 +317,44 @@
                             <!-- Stats bars injected here -->
                         </div>
                     </div>
+
+                    <!-- Timer bar chart panel -->
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
+                            <h3 style="margin:0;">日別学習時間</h3>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button class="btn secondary active" id="btn-chart-7d" style="padding:0.35rem 0.75rem; font-size:0.82rem;">7日</button>
+                                <button class="btn secondary" id="btn-chart-30d" style="padding:0.35rem 0.75rem; font-size:0.82rem;">30日</button>
+                            </div>
+                        </div>
+                        <div id="timer-bar-chart"></div>
+                    </div>
+
+                    <!-- Calorie tracking panel -->
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">
+                            <h3 style="margin:0;">カロリー記録</h3>
+                            <div style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem; color:var(--text-secondary);">
+                                目標
+                                <input type="number" id="calorie-target-input" min="100" max="9999" value="2000"
+                                    style="width:70px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.25); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.85rem; text-align:center;">
+                                kcal
+                            </div>
+                        </div>
+                        <div class="cal-input-row">
+                            <input type="text" id="calorie-label-input" placeholder="食事内容（例: 朝食）"
+                                style="flex:3; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.95rem;">
+                            <input type="number" id="calorie-amount-input" placeholder="kcal" min="0"
+                                style="flex:1; min-width:80px; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.95rem;">
+                            <button id="btn-add-calorie" class="btn primary" style="padding:10px 16px; white-space:nowrap;">+ 追加</button>
+                        </div>
+                        <div id="calorie-today-summary" style="margin-top:1rem;"></div>
+                        <div id="calorie-records-list" style="margin-top:0.75rem;"></div>
+                        <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--panel-border);">
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:.05em;">過去7日間の推移</p>
+                            <div id="calorie-chart"></div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -480,7 +518,8 @@
     <div id="reflection-modal" class="modal-overlay">
         <div class="modal">
             <h2>今日の振り返り</h2>
-            <p>今日もお疲れ様でした！一言メモを残しましょう。</p>
+            <p id="reflection-modal-sub">今日もお疲れ様でした。</p>
+            <div id="reflection-time-warning" style="display:none; padding:0.75rem 1rem; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; color:var(--danger-color); font-size:0.9rem; margin-bottom:1rem;"></div>
             <div class="stats-summary">
                 <div class="stat-box">
                     <span class="stat-label">達成率</span>
@@ -491,17 +530,23 @@
                     <span class="stat-value" id="modal-task-count">0/0</span>
                 </div>
             </div>
-            <div class="input-group">
-                <label for="reflection-memo">一言メモ</label>
-                <textarea id="reflection-memo" rows="4" placeholder="今日良かったことや、明日に活かしたいこと..."></textarea>
+            <div id="reflection-fields">
+                <div class="input-group">
+                    <label for="reflection-feeling">今日の感想</label>
+                    <textarea id="reflection-feeling" rows="3" placeholder="今日はどんな一日でしたか？"></textarea>
+                </div>
+                <div class="input-group" style="margin-top:1rem;">
+                    <label for="reflection-learned">今日学んだこと</label>
+                    <textarea id="reflection-learned" rows="3" placeholder="新しく気づいたこと、身についたこと..."></textarea>
+                </div>
             </div>
             <div class="modal-actions">
-                <button id="btn-cancel-reflection" class="btn ghost">キャンセル</button>
-                <button id="btn-save-reflection" class="btn primary">保存して一日を終了する</button>
+                <button id="btn-cancel-reflection" class="btn ghost">閉じる</button>
+                <button id="btn-save-reflection" class="btn primary">保存する</button>
             </div>
         </div>
     </div>
 
-    <script src="app.js?v=45"></script>
+    <script src="app.js?v=48"></script>
 </body>
 </html>

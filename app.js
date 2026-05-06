@@ -69,6 +69,7 @@ function loadData() {
             state.timer = { taskId: null, startTime: null, isRunning: false, accumulatedSeconds: 0 };
         }
         if (!state.pausedTimers) state.pausedTimers = [];
+        if (!state.calories) state.calories = {};
     }
     
     // Check for new day
@@ -136,7 +137,8 @@ const btnImport = document.getElementById('btn-import');
 const modalReflection = document.getElementById('reflection-modal');
 const btnSaveReflection = document.getElementById('btn-save-reflection');
 const btnCancelReflection = document.getElementById('btn-cancel-reflection');
-const textMemo = document.getElementById('reflection-memo');
+const textFeeling = document.getElementById('reflection-feeling');
+const textLearned = document.getElementById('reflection-learned');
 
 // History Calendar
 const calendarMonthYear = document.getElementById('calendar-month-year');
@@ -489,6 +491,7 @@ async function fetchCloudData() {
                 state.timer = cloudState.timer;
             }
             state.pausedTimers = cloudState.pausedTimers || [];
+            state.calories = cloudState.calories || {};
             state.memos = cloudState.memos || [];
 
             // Re-render views
@@ -529,6 +532,7 @@ async function saveToCloud() {
             settings: state.settings,
             timer: state.timer,
             pausedTimers: state.pausedTimers,
+            calories: state.calories,
             memos: state.memos
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
@@ -640,6 +644,8 @@ function switchView(viewId) {
     } else if (viewId === 'stats') {
         renderStats('daily');
         setActiveStatBtn(btnStatDaily);
+        renderTimerBarChart();
+        renderCalorieSection();
     } else if (viewId === 'schedule') {
         renderWeeklySchedule();
     } else if (viewId === 'settings') {
@@ -722,6 +728,29 @@ function setupEventListeners() {
     if(btnStatDaily) btnStatDaily.addEventListener('click', () => { setActiveStatBtn(btnStatDaily); renderStats('daily'); });
     if(btnStatWeekly) btnStatWeekly.addEventListener('click', () => { setActiveStatBtn(btnStatWeekly); renderStats('weekly'); });
     if(btnStatMonthly) btnStatMonthly.addEventListener('click', () => { setActiveStatBtn(btnStatMonthly); renderStats('monthly'); });
+
+    // Timer chart period buttons
+    const btnChart7  = document.getElementById('btn-chart-7d');
+    const btnChart30 = document.getElementById('btn-chart-30d');
+    function setChartBtn(active) {
+        [btnChart7, btnChart30].forEach(b => b && b.classList.remove('active'));
+        if (active) active.classList.add('active');
+    }
+    if (btnChart7)  btnChart7.addEventListener('click',  () => { timerChartDays = 7;  setChartBtn(btnChart7);  renderTimerBarChart(); });
+    if (btnChart30) btnChart30.addEventListener('click', () => { timerChartDays = 30; setChartBtn(btnChart30); renderTimerBarChart(); });
+
+    // Calorie handlers
+    const btnAddCalorie    = document.getElementById('btn-add-calorie');
+    const calorieLabel     = document.getElementById('calorie-label-input');
+    const calorieAmount    = document.getElementById('calorie-amount-input');
+    const calorieTargetEl  = document.getElementById('calorie-target-input');
+    if (btnAddCalorie) btnAddCalorie.addEventListener('click', addCalorieRecord);
+    if (calorieAmount) calorieAmount.addEventListener('keydown', e => { if (e.key === 'Enter') addCalorieRecord(); });
+    if (calorieLabel)  calorieLabel.addEventListener('keydown',  e => { if (e.key === 'Enter') calorieAmount && calorieAmount.focus(); });
+    if (calorieTargetEl) calorieTargetEl.addEventListener('change', () => {
+        const v = parseInt(calorieTargetEl.value);
+        if (v > 0) { state.settings.calorieTarget = v; saveData(); renderCalorieSection(); }
+    });
 
     // Schedule
     if(btnPrevWeek) btnPrevWeek.addEventListener('click', () => {
@@ -1869,6 +1898,11 @@ function updateProgressRing(completed, total) {
 }
 
 // --- Reflection Modal ---
+function isReflectionTime() {
+    const h = new Date().getHours();
+    return h >= 22 || h < 2;
+}
+
 function openReflectionModal() {
     const total = state.tasks.length;
     const completed = state.tasks.filter(t => t.completed).length;
@@ -1876,19 +1910,35 @@ function openReflectionModal() {
 
     document.getElementById('modal-completion-rate').textContent = `${percent}%`;
     document.getElementById('modal-task-count').textContent = `${completed}/${total}`;
-    
-    // Check if we already reflected today
+
     const today = getTodayString();
-    if (state.history[today]) {
-        textMemo.value = state.history[today].memo;
+    const saved = state.history[today];
+    textFeeling.value = saved ? (saved.feeling || '') : '';
+    textLearned.value = saved ? (saved.learned || '') : '';
+
+    const warning = document.getElementById('reflection-time-warning');
+    const fields  = document.getElementById('reflection-fields');
+    const saveBtn = document.getElementById('btn-save-reflection');
+
+    if (isReflectionTime()) {
+        warning.style.display = 'none';
+        fields.style.opacity  = '1';
+        fields.style.pointerEvents = 'auto';
+        saveBtn.disabled = false;
     } else {
-        textMemo.value = '';
+        warning.textContent = '振り返りは22時〜翌2時の間のみ記入できます。';
+        warning.style.display = 'block';
+        fields.style.opacity  = '0.4';
+        fields.style.pointerEvents = 'none';
+        saveBtn.disabled = true;
     }
 
     modalReflection.classList.add('active');
 }
 
 function saveReflection() {
+    if (!isReflectionTime()) return;
+
     const today = getTodayString();
     const total = state.tasks.length;
     const completed = state.tasks.filter(t => t.completed).length;
@@ -1901,18 +1951,19 @@ function saveReflection() {
         durationByTag[tag] += (t.duration || 0);
     });
 
+    const existing = state.history[today] || {};
     state.history[today] = {
+        ...existing,
         rate: percent,
         tasksCompleted: completed,
         tasksTotal: total,
-        memo: textMemo.value.trim(),
+        feeling: textFeeling.value.trim(),
+        learned: textLearned.value.trim(),
         durationByTag
     };
 
     saveData();
     modalReflection.classList.remove('active');
-    
-    // Optionally show a toast/alert
     alert("振り返りを保存しました！お疲れ様でした。");
 }
 
@@ -2015,7 +2066,13 @@ function showHistoryDetail(dateStr) {
                 <span style="font-size:1.4rem; font-weight:bold; color:${rateColor}">${data.rate}%</span>
             </div>`;
 
-        if (data.memo) {
+        if (data.feeling) {
+            html += `<div class="history-memo" style="margin-bottom:0.5rem;"><span style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.25rem;">感想</span>${data.feeling.replace(/\n/g, '<br>')}</div>`;
+        }
+        if (data.learned) {
+            html += `<div class="history-memo" style="margin-bottom:1.25rem;"><span style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.25rem;">学んだこと</span>${data.learned.replace(/\n/g, '<br>')}</div>`;
+        }
+        if (!data.feeling && !data.learned && data.memo) {
             html += `<div class="history-memo" style="margin-bottom:1.25rem;">${data.memo.replace(/\n/g, '<br>')}</div>`;
         }
     }
@@ -2194,6 +2251,208 @@ function renderStats(period) {
             </div>
         `;
     });
+}
+
+// --- Timer Bar Chart ---
+let timerChartDays = 7;
+
+function getTimerMinutesForDate(dateStr) {
+    return state.schedules
+        .filter(s => s.tag === 'record' && s.date === dateStr && s.startTime && s.endTime)
+        .reduce((sum, s) => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            let mins = (eh * 60 + em) - (sh * 60 + sm);
+            if (mins < 0) mins += 1440;
+            return sum + Math.max(0, mins);
+        }, 0);
+}
+
+function renderTimerBarChart() {
+    const container = document.getElementById('timer-bar-chart');
+    if (!container) return;
+
+    const data = [];
+    const today = new Date();
+    for (let i = timerChartDays - 1; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toLocaleDateString('en-CA');
+        const minutes = getTimerMinutesForDate(dateStr);
+        const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+        data.push({ minutes, day: String(d.getDate()), dow, isToday: i === 0 });
+    }
+
+    const maxMins = Math.max(...data.map(d => d.minutes), 30);
+    const maxH    = Math.ceil(maxMins / 60);
+    const yMax    = maxH * 60;
+    const totalMins = data.reduce((s, d) => s + d.minutes, 0);
+    const tH = Math.floor(totalMins / 60), tM = totalMins % 60;
+    const totalStr = tH > 0 ? `${tH}時間${tM > 0 ? tM + '分' : ''}` : `${tM}分`;
+    let streak = 0;
+    for (let i = data.length - 1; i >= 0; i--) { if (data[i].minutes > 0) streak++; else break; }
+
+    const CHART_H = 150;
+    const Y_W = 34;
+    const yStepH = maxH <= 2 ? 1 : maxH <= 6 ? 2 : Math.ceil(maxH / 4);
+    const yTicks = [];
+    for (let h = 0; h <= maxH; h += yStepH) yTicks.push(h);
+    if (yTicks[yTicks.length - 1] !== maxH) yTicks.push(maxH);
+
+    // Y-axis labels (from bottom)
+    const yLabelsHtml = yTicks.map(h => {
+        const px = Math.round((h / maxH) * CHART_H);
+        return `<div style="position:absolute;right:4px;bottom:${px}px;font-size:0.62rem;color:var(--text-secondary);transform:translateY(50%);white-space:nowrap">${h}h</div>`;
+    }).join('');
+
+    // Grid lines inside bars area (position:absolute)
+    const gridHtml = yTicks.map(h => {
+        const px = Math.round((h / maxH) * CHART_H);
+        return `<div style="position:absolute;left:0;right:0;bottom:${px}px;height:1px;background:rgba(255,255,255,0.06);pointer-events:none"></div>`;
+    }).join('');
+
+    const showDow = timerChartDays <= 14;
+    // Bar columns and x-labels rendered separately
+    const barColsHtml = data.map(d => {
+        const barPx = d.minutes > 0 ? Math.max(3, Math.round((d.minutes / yMax) * CHART_H)) : 0;
+        const h = Math.floor(d.minutes / 60), m = d.minutes % 60;
+        const tip = d.minutes > 0 ? (h > 0 ? `${h}h${m > 0 ? m + 'm' : ''}` : `${m}m`) : '';
+        return `<div class="cbc${d.isToday ? ' cbc-today' : ''}">
+            ${tip ? `<div class="c-tip">${tip}</div>` : ''}
+            <div class="c-bar" style="height:${barPx}px"></div>
+        </div>`;
+    }).join('');
+
+    const xLabelsHtml = data.map(d =>
+        `<div class="cxl${d.isToday ? ' cxl-today' : ''}">${d.day}${showDow ? `<br><span style="opacity:.6;font-size:0.58rem">${d.dow}</span>` : ''}</div>`
+    ).join('');
+
+    container.innerHTML = `
+        <div class="chart-meta-row">
+            <span class="chart-total-val">${totalStr}</span>
+            ${streak >= 2 ? `<span class="chart-streak-badge">🔥 ${streak}日連続</span>` : ''}
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:0">
+            <div style="width:${Y_W}px;height:${CHART_H}px;position:relative;flex-shrink:0">${yLabelsHtml}</div>
+            <div style="flex:1;overflow-x:auto">
+                <div style="display:flex;flex-direction:column;min-width:100%">
+                    <div class="c-bars-area" style="height:${CHART_H}px;position:relative">${gridHtml}${barColsHtml}</div>
+                    <div class="c-xlabels-row">${xLabelsHtml}</div>
+                </div>
+            </div>
+        </div>`;
+}
+
+// --- Calorie Tracking ---
+function renderCalorieSection() {
+    const today = getTodayString();
+    if (!state.calories[today]) state.calories[today] = [];
+    const records = state.calories[today];
+    const total   = records.reduce((s, r) => s + r.kcal, 0);
+    const target  = state.settings.calorieTarget || 2000;
+    const pct     = Math.min(110, Math.round((total / target) * 100));
+    const remain  = target - total;
+    const fillColor = pct > 105 ? 'var(--danger-color)' : pct > 85 ? '#f59e0b' : '#10b981';
+
+    const targetEl = document.getElementById('calorie-target-input');
+    if (targetEl && !targetEl.matches(':focus')) targetEl.value = target;
+
+    const sumEl = document.getElementById('calorie-today-summary');
+    if (sumEl) {
+        sumEl.innerHTML = `
+            <div class="cal-summary">
+                <div class="cal-numbers">
+                    <span class="cal-consumed">${total}</span>
+                    <span class="cal-sep"> / ${target} kcal</span>
+                </div>
+                <div class="cal-bar-bg"><div class="cal-bar-fill" style="width:${Math.min(100,pct)}%; background:${fillColor}"></div></div>
+                <div class="cal-remain">${remain >= 0 ? `あと ${remain} kcal` : `超過 ${-remain} kcal`}</div>
+            </div>`;
+    }
+
+    const listEl = document.getElementById('calorie-records-list');
+    if (listEl) {
+        listEl.innerHTML = records.length === 0
+            ? '<p class="empty-state" style="font-size:0.85rem; padding:0.5rem 0;">まだ記録がありません</p>'
+            : records.map(r => `
+                <div class="cal-record">
+                    <span class="cal-record-name">${r.label}</span>
+                    <span class="cal-record-kcal">${r.kcal} kcal</span>
+                    <button class="cal-del-btn" onclick="deleteCalorieRecord('${today}','${r.id}')">✕</button>
+                </div>`).join('');
+    }
+
+    renderCalorieChart();
+}
+
+function renderCalorieChart() {
+    const container = document.getElementById('calorie-chart');
+    if (!container) return;
+    const target = state.settings.calorieTarget || 2000;
+
+    const data = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toLocaleDateString('en-CA');
+        const recs = state.calories[dateStr] || [];
+        const kcal = recs.reduce((s, r) => s + r.kcal, 0);
+        const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+        data.push({ kcal, day: String(d.getDate()), dow, isToday: i === 0 });
+    }
+
+    const maxKcal = Math.max(...data.map(d => d.kcal), target * 1.1);
+    const CHART_H = 120;
+    const targetPx = Math.round((target / maxKcal) * CHART_H);
+
+    const barColsHtml = data.map(d => {
+        const barPx = d.kcal > 0 ? Math.max(3, Math.round((d.kcal / maxKcal) * CHART_H)) : 0;
+        const color = d.kcal > target ? 'var(--danger-color)' : '#10b981';
+        return `<div class="cbc${d.isToday ? ' cbc-today' : ''}">
+            ${d.kcal > 0 ? `<div class="c-tip">${d.kcal}</div>` : ''}
+            <div class="c-bar" style="height:${barPx}px;background:${color};background-image:none"></div>
+        </div>`;
+    }).join('');
+
+    const xLabelsHtml = data.map(d =>
+        `<div class="cxl${d.isToday ? ' cxl-today' : ''}">${d.day}<br><span style="opacity:.6;font-size:0.58rem">${d.dow}</span></div>`
+    ).join('');
+
+    // Target line and grid lines inside bars area
+    const targetLine = `<div style="position:absolute;left:0;right:0;bottom:${targetPx}px;border-top:1.5px dashed rgba(245,158,11,0.7);pointer-events:none">
+        <span style="position:absolute;right:2px;top:-12px;font-size:0.58rem;color:#f59e0b;white-space:nowrap">目標 ${target}</span>
+    </div>`;
+
+    container.innerHTML = `
+        <div style="display:flex;flex-direction:column">
+            <div class="c-bars-area" style="height:${CHART_H}px;position:relative">${targetLine}${barColsHtml}</div>
+            <div class="c-xlabels-row">${xLabelsHtml}</div>
+        </div>`;
+}
+
+function addCalorieRecord() {
+    const labelEl  = document.getElementById('calorie-label-input');
+    const amountEl = document.getElementById('calorie-amount-input');
+    if (!labelEl || !amountEl) return;
+    const label = labelEl.value.trim() || '食事';
+    const kcal  = parseInt(amountEl.value);
+    if (!kcal || kcal <= 0) { amountEl.focus(); return; }
+    const today = getTodayString();
+    if (!state.calories[today]) state.calories[today] = [];
+    state.calories[today].push({ id: generateId(), label, kcal });
+    labelEl.value = '';
+    amountEl.value = '';
+    labelEl.focus();
+    saveData();
+    renderCalorieSection();
+}
+
+function deleteCalorieRecord(dateStr, id) {
+    if (!state.calories[dateStr]) return;
+    state.calories[dateStr] = state.calories[dateStr].filter(r => r.id !== id);
+    saveData();
+    renderCalorieSection();
 }
 
 // --- Weekly Schedule Logic ---
