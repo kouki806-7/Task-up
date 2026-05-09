@@ -95,12 +95,21 @@ function loadData() {
 
 function saveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    renderDashboard();
-    
-    // Trigger Firebase sync if logged in
-    if (currentUser) {
-        saveToCloud();
+    if (document.getElementById('view-dashboard').classList.contains('active')) {
+        renderDashboard();
     }
+    if (currentUser) {
+        scheduleCloudSave();
+    }
+}
+
+let _cloudSaveTimer = null;
+function scheduleCloudSave() {
+    if (_cloudSaveTimer) clearTimeout(_cloudSaveTimer);
+    _cloudSaveTimer = setTimeout(() => {
+        _cloudSaveTimer = null;
+        saveToCloud();
+    }, 2000);
 }
 
 function generateId() {
@@ -619,7 +628,6 @@ function init() {
     dateDisplay.textContent = today.toLocaleDateString('ja-JP', { weekday: 'short', month: 'long', day: 'numeric' });
     
     renderDashboard();
-    renderHistoryCalendar();
     fetchWeather();
     syncTimerUI();
     
@@ -642,7 +650,9 @@ function switchView(viewId) {
         else link.classList.remove('active');
     });
 
-    if (viewId === 'history') {
+    if (viewId === 'dashboard') {
+        renderDashboard();
+    } else if (viewId === 'history') {
         renderHistoryCalendar();
     } else if (viewId === 'stats') {
         renderStats('daily');
@@ -2176,47 +2186,34 @@ function renderStats(period) {
     const tagCounts = {};
     let totalMins = 0;
     const dateSet = new Set(dates);
-
-    state.schedules
-        .filter(s => s.tag === 'record' && dateSet.has(s.date) && s.startTime && s.endTime)
-        .forEach(s => {
-            const [sh, sm] = s.startTime.split(':').map(Number);
-            const [eh, em] = s.endTime.split(':').map(Number);
-            let startMin = sh * 60 + sm;
-            let endMin = eh * 60 + em;
-            if (endMin < startMin) endMin += 24 * 60;
-            const mins = endMin - startMin;
-            if (mins <= 0) return;
-
-            // Use stored taskTag, fall back to matching task by name, then 'タスク'
-            let tag = s.taskTag;
-            if (!tag) {
-                const taskName = s.title.replace(/^⏱\s*/, '');
-                const matched = state.tasks.find(t => t.text === taskName);
-                tag = (matched && matched.tag) ? matched.tag : 'タスク';
-            }
-
-            tagCounts[tag] = (tagCounts[tag] || 0) + mins;
-            totalMins += mins;
-        });
-
-    // Achievement Rate
     let plannedTotal = 0;
     let recordedTotal = 0;
+
+    // Single pass: build tag breakdown AND achievement totals at once
     state.schedules.forEach(s => {
         if (!s.startTime || !s.endTime) return;
         const [sh, sm] = s.startTime.split(':').map(Number);
         const [eh, em] = s.endTime.split(':').map(Number);
-        
-        let startH = sh + sm / 60;
-        let endH = eh + em / 60;
-        if (endH < startH) endH += 24;
-        const duration = endH - startH;
-        
+        let startMin = sh * 60 + sm;
+        let endMin = eh * 60 + em;
+        if (endMin < startMin) endMin += 24 * 60;
+        const mins = endMin - startMin;
+        if (mins <= 0) return;
+
         if (s.tag === 'record') {
-            recordedTotal += duration;
+            recordedTotal += mins / 60;
+            if (dateSet.has(s.date)) {
+                let tag = s.taskTag;
+                if (!tag) {
+                    const taskName = s.title.replace(/^⏱\s*/, '');
+                    const matched = state.tasks.find(t => t.text === taskName);
+                    tag = (matched && matched.tag) ? matched.tag : 'タスク';
+                }
+                tagCounts[tag] = (tagCounts[tag] || 0) + mins;
+                totalMins += mins;
+            }
         } else if (s.tag !== 'カレンダー' && s.tag !== 'calendar') {
-            plannedTotal += duration;
+            plannedTotal += mins / 60;
         }
     });
     
@@ -2239,13 +2236,9 @@ function renderStats(period) {
         elRecorded.textContent = recordedTotal.toFixed(1) + ' 時間';
     }
 
-    statsContent.innerHTML = '';
-    
-    let hasData = false;
-    for (let t in tagCounts) {
-        if (tagCounts[t] > 0) hasData = true;
-    }
-    if (!hasData) {
+    const sortedTags = Object.keys(tagCounts).filter(t => tagCounts[t] > 0).sort((a, b) => tagCounts[b] - tagCounts[a]);
+
+    if (sortedTags.length === 0) {
         statsContent.innerHTML = '<p class="empty-state">完了したタスクのデータがありません。</p>';
         return;
     }
@@ -2258,51 +2251,39 @@ function renderStats(period) {
         'カレンダー': 'var(--tag-calendar)'
     };
 
-    // Sort by duration descending
-    const sortedTags = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]);
-
-    sortedTags.forEach(tag => {
-        if (tagCounts[tag] === 0) return;
+    // Build HTML in one pass, set innerHTML once
+    statsContent.innerHTML = sortedTags.map(tag => {
         const mins = tagCounts[tag];
         const hours = Math.floor(mins / 60);
         const m = mins % 60;
         const timeStr = hours > 0 ? `${hours}時間 ${m}分` : `${m}分`;
         const percent = Math.round((mins / totalMins) * 100);
-        
         const color = tagColorMap[tag] || 'var(--tag-task)';
-        
-        statsContent.innerHTML += `
-            <div class="stat-item">
-                <div class="stat-header">
-                    <span>${tag}</span>
-                    <span>${timeStr} (${percent}%)</span>
-                </div>
-                <div class="stat-bar-bg">
-                    <div class="stat-bar-fill" style="width: ${percent}%; background: ${color}"></div>
-                </div>
-            </div>
-        `;
-    });
+        return `<div class="stat-item">
+            <div class="stat-header"><span>${tag}</span><span>${timeStr} (${percent}%)</span></div>
+            <div class="stat-bar-bg"><div class="stat-bar-fill" style="width:${percent}%;background:${color}"></div></div>
+        </div>`;
+    }).join('');
 }
 
 // --- Timer Bar Chart ---
 let timerChartDays = 7;
 
-function getTimerMinutesForDate(dateStr) {
-    return state.schedules
-        .filter(s => s.tag === 'record' && s.date === dateStr && s.startTime && s.endTime)
-        .reduce((sum, s) => {
-            const [sh, sm] = s.startTime.split(':').map(Number);
-            const [eh, em] = s.endTime.split(':').map(Number);
-            let mins = (eh * 60 + em) - (sh * 60 + sm);
-            if (mins < 0) mins += 1440;
-            return sum + Math.max(0, mins);
-        }, 0);
-}
 
 function renderTimerBarChart() {
     const container = document.getElementById('timer-bar-chart');
     if (!container) return;
+
+    // Pre-group record schedules by date in one pass instead of O(n×days) repeated scans
+    const recordMinsByDate = {};
+    state.schedules.forEach(s => {
+        if (s.tag !== 'record' || !s.startTime || !s.endTime) return;
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins < 0) mins += 1440;
+        recordMinsByDate[s.date] = (recordMinsByDate[s.date] || 0) + Math.max(0, mins);
+    });
 
     const data = [];
     const today = new Date();
@@ -2310,7 +2291,7 @@ function renderTimerBarChart() {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
         const dateStr = d.toLocaleDateString('en-CA');
-        const minutes = getTimerMinutesForDate(dateStr);
+        const minutes = recordMinsByDate[dateStr] || 0;
         const dow = ['日','月','火','水','木','金','土'][d.getDay()];
         data.push({ minutes, day: String(d.getDate()), dow, isToday: i === 0 });
     }
