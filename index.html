@@ -330,6 +330,32 @@
                         <div id="timer-bar-chart"></div>
                     </div>
 
+                    <!-- Expense tracking panel -->
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">
+                            <h3 style="margin:0;">支出記録</h3>
+                            <div style="display:flex; align-items:center; gap:0.5rem; font-size:0.85rem; color:var(--text-secondary);">
+                                予算
+                                <input type="number" id="expense-budget-input" min="100" max="999999" value="3000"
+                                    style="width:80px; padding:4px 8px; border-radius:6px; background:rgba(0,0,0,0.25); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.85rem; text-align:center;">
+                                円
+                            </div>
+                        </div>
+                        <div class="cal-input-row">
+                            <input type="text" id="expense-label-input" placeholder="内容（例: 昼食）"
+                                style="flex:3; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.95rem;">
+                            <input type="number" id="expense-amount-input" placeholder="円" min="0"
+                                style="flex:1; min-width:80px; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary); font-size:0.95rem;">
+                            <button id="btn-add-expense" class="btn primary" style="padding:10px 16px; white-space:nowrap;">+ 追加</button>
+                        </div>
+                        <div id="expense-today-summary" style="margin-top:1rem;"></div>
+                        <div id="expense-records-list" style="margin-top:0.75rem;"></div>
+                        <div style="margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--panel-border);">
+                            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.75rem; text-transform:uppercase; letter-spacing:.05em;">過去7日間の推移</p>
+                            <div id="expense-chart"></div>
+                        </div>
+                    </div>
+
                     <!-- Calorie tracking panel -->
                     <div class="panel" style="margin-top: 1.5rem;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.5rem;">

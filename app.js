@@ -70,6 +70,7 @@ function loadData() {
         }
         if (!state.pausedTimers) state.pausedTimers = [];
         if (!state.calories) state.calories = {};
+        if (!state.expenses) state.expenses = {};
     }
     
     // Check for new day
@@ -492,6 +493,7 @@ async function fetchCloudData() {
             }
             state.pausedTimers = cloudState.pausedTimers || [];
             state.calories = cloudState.calories || {};
+            state.expenses = cloudState.expenses || {};
             state.memos = cloudState.memos || [];
 
             // Re-render views
@@ -533,6 +535,7 @@ async function saveToCloud() {
             timer: state.timer,
             pausedTimers: state.pausedTimers,
             calories: state.calories,
+            expenses: state.expenses,
             memos: state.memos
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
@@ -646,6 +649,7 @@ function switchView(viewId) {
         setActiveStatBtn(btnStatDaily);
         renderTimerBarChart();
         renderCalorieSection();
+        renderExpenseSection();
     } else if (viewId === 'schedule') {
         renderWeeklySchedule();
     } else if (viewId === 'settings') {
@@ -750,6 +754,19 @@ function setupEventListeners() {
     if (calorieTargetEl) calorieTargetEl.addEventListener('change', () => {
         const v = parseInt(calorieTargetEl.value);
         if (v > 0) { state.settings.calorieTarget = v; saveData(); renderCalorieSection(); }
+    });
+
+    // Expense handlers
+    const btnAddExpense   = document.getElementById('btn-add-expense');
+    const expenseLabelEl  = document.getElementById('expense-label-input');
+    const expenseAmountEl = document.getElementById('expense-amount-input');
+    const expenseBudgetEl = document.getElementById('expense-budget-input');
+    if (btnAddExpense)   btnAddExpense.addEventListener('click', addExpenseRecord);
+    if (expenseAmountEl) expenseAmountEl.addEventListener('keydown', e => { if (e.key === 'Enter') addExpenseRecord(); });
+    if (expenseLabelEl)  expenseLabelEl.addEventListener('keydown',  e => { if (e.key === 'Enter') expenseAmountEl && expenseAmountEl.focus(); });
+    if (expenseBudgetEl) expenseBudgetEl.addEventListener('change', () => {
+        const v = parseInt(expenseBudgetEl.value);
+        if (v > 0) { state.settings.expenseBudget = v; saveData(); renderExpenseSection(); }
     });
 
     // Schedule
@@ -2111,6 +2128,21 @@ function showHistoryDetail(dateStr) {
         });
     }
 
+    // --- Expense summary ---
+    const dayExpenses = (state.expenses && state.expenses[dateStr]) || [];
+    if (dayExpenses.length > 0) {
+        const expTotal = dayExpenses.reduce((s, r) => s + r.amount, 0);
+        html += `<div style="font-weight:600; font-size:0.85rem; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.05em; margin-bottom:0.5rem; margin-top:1.25rem;">支出</div>`;
+        html += `<div style="font-size:1.2rem; font-weight:700; color:var(--text-primary); margin-bottom:0.5rem;">¥${expTotal.toLocaleString()}</div>`;
+        dayExpenses.forEach(r => {
+            html += `
+                <div style="display:flex; justify-content:space-between; padding:0.3rem 0; border-bottom:1px solid var(--panel-border); font-size:0.88rem;">
+                    <span style="color:var(--text-primary);">${r.label}</span>
+                    <span style="color:var(--text-secondary);">¥${r.amount.toLocaleString()}</span>
+                </div>`;
+        });
+    }
+
     historyDetailContent.innerHTML = html;
 }
 
@@ -2453,6 +2485,111 @@ function deleteCalorieRecord(dateStr, id) {
     state.calories[dateStr] = state.calories[dateStr].filter(r => r.id !== id);
     saveData();
     renderCalorieSection();
+}
+
+// --- Expense Tracking ---
+function renderExpenseSection() {
+    const today = getTodayString();
+    if (!state.expenses) state.expenses = {};
+    if (!state.expenses[today]) state.expenses[today] = [];
+    const records = state.expenses[today];
+    const total   = records.reduce((s, r) => s + r.amount, 0);
+    const budget  = state.settings.expenseBudget || 3000;
+    const pct     = Math.min(110, Math.round((total / budget) * 100));
+    const remain  = budget - total;
+    const fillColor = pct > 105 ? 'var(--danger-color)' : pct > 85 ? '#f59e0b' : '#10b981';
+
+    const budgetEl = document.getElementById('expense-budget-input');
+    if (budgetEl && !budgetEl.matches(':focus')) budgetEl.value = budget;
+
+    const sumEl = document.getElementById('expense-today-summary');
+    if (sumEl) {
+        sumEl.innerHTML = `
+            <div class="cal-summary">
+                <div class="cal-numbers">
+                    <span class="cal-consumed">¥${total.toLocaleString()}</span>
+                    <span class="cal-sep"> / ¥${budget.toLocaleString()}</span>
+                </div>
+                <div class="cal-bar-bg"><div class="cal-bar-fill" style="width:${pct}%; background:${fillColor};"></div></div>
+                <p class="cal-remain">${remain >= 0 ? `残り ¥${remain.toLocaleString()}` : `¥${Math.abs(remain).toLocaleString()} オーバー`}</p>
+            </div>`;
+    }
+
+    const listEl = document.getElementById('expense-records-list');
+    if (listEl) {
+        listEl.innerHTML = records.length === 0
+            ? '<p class="empty-state" style="font-size:0.85rem; padding:0.5rem 0;">まだ記録がありません</p>'
+            : records.map(r => `
+                <div class="cal-record">
+                    <span class="cal-record-name">${r.label}</span>
+                    <span class="cal-record-kcal">¥${r.amount.toLocaleString()}</span>
+                    <button class="cal-del-btn" onclick="deleteExpenseRecord('${today}','${r.id}')">✕</button>
+                </div>`).join('');
+    }
+
+    renderExpenseChart();
+}
+
+function renderExpenseChart() {
+    const container = document.getElementById('expense-chart');
+    if (!container) return;
+    const budget = state.settings.expenseBudget || 3000;
+
+    const data = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toLocaleDateString('en-CA');
+        const recs = (state.expenses && state.expenses[dateStr]) || [];
+        const amount = recs.reduce((s, r) => s + r.amount, 0);
+        const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+        data.push({ amount, day: String(d.getDate()), dow, isToday: i === 0 });
+    }
+
+    const maxVal = Math.max(...data.map(d => d.amount), budget, 1);
+
+    const barsHtml = data.map(d => {
+        const barH = Math.round((d.amount / maxVal) * 80);
+        const barColor = d.amount > budget ? 'var(--danger-color)' : d.amount > budget * 0.85 ? '#f59e0b' : 'linear-gradient(to top, #6366f1, #818cf8)';
+        return `<div class="cbc${d.isToday ? ' cbc-today' : ''}">
+            <span class="c-tip">¥${d.amount.toLocaleString()}</span>
+            <div class="c-bar" style="height:${barH}px; background:${barColor};"></div>
+        </div>`;
+    }).join('');
+
+    const xlabels = data.map(d =>
+        `<div class="cxl${d.isToday ? ' cxl-today' : ''}">${d.dow}<br>${d.day}</div>`
+    ).join('');
+
+    container.innerHTML = `
+        <div style="height:80px;" class="c-bars-area">${barsHtml}</div>
+        <div class="c-xlabels-row">${xlabels}</div>`;
+}
+
+function addExpenseRecord() {
+    const labelEl  = document.getElementById('expense-label-input');
+    const amountEl = document.getElementById('expense-amount-input');
+    if (!labelEl || !amountEl) return;
+    const label  = labelEl.value.trim() || '支出';
+    const amount = parseInt(amountEl.value);
+    if (!amount || amount <= 0) { amountEl.focus(); return; }
+    const today = getTodayString();
+    if (!state.expenses) state.expenses = {};
+    if (!state.expenses[today]) state.expenses[today] = [];
+    state.expenses[today].push({ id: generateId(), label, amount });
+    labelEl.value = '';
+    amountEl.value = '';
+    labelEl.focus();
+    saveData();
+    renderExpenseSection();
+}
+
+function deleteExpenseRecord(dateStr, id) {
+    if (!state.expenses || !state.expenses[dateStr]) return;
+    state.expenses[dateStr] = state.expenses[dateStr].filter(r => r.id !== id);
+    saveData();
+    renderExpenseSection();
 }
 
 // --- Weekly Schedule Logic ---
