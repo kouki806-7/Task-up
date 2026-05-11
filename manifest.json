@@ -1,0 +1,17 @@
+{
+    "name": "Daily Flow",
+    "short_name": "Daily Flow",
+    "description": "タスク管理・スケジュール管理アプリ",
+    "start_url": "./",
+    "display": "standalone",
+    "background_color": "#0b0f19",
+    "theme_color": "#6366f1",
+    "icons": [
+        {
+            "src": "icon.jpg",
+            "sizes": "any",
+            "type": "image/jpeg",
+            "purpose": "any maskable"
+        }
+    ]
+}

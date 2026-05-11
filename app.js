@@ -25,7 +25,8 @@ let state = {
         startTime: null, // timestamp
         isRunning: false,
         accumulatedSeconds: 0
-    }
+    },
+    diary: {}    // { 'YYYY-MM-DD': { docId, webViewLink, localNote } }
 };
 
 function getTodayString() {
@@ -71,6 +72,7 @@ function loadData() {
         if (!state.pausedTimers) state.pausedTimers = [];
         if (!state.calories) state.calories = {};
         if (!state.expenses) state.expenses = {};
+        if (!state.diary) state.diary = {};
     }
     
     // Check for new day
@@ -188,8 +190,11 @@ function getMonday(d) {
 
 // --- Google API ---
 let isSilentAuthAttempt = false;
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly';
+const DISCOVERY_DOCS = [
+    'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
+    'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+];
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file';
 let tokenClient;
 let gapiInited = false;
 let gisInited = false;
@@ -201,7 +206,7 @@ function initGAPI() {
             try {
                 await gapi.client.init({
                     apiKey: state.settings.apiKey,
-                    discoveryDocs: [DISCOVERY_DOC],
+                    discoveryDocs: DISCOVERY_DOCS,
                 });
                 gapiInited = true;
             } catch(e) { console.error("GAPI init error", e); }
@@ -444,6 +449,34 @@ let db = null;
 let auth = null;
 let currentUser = null;
 
+// True when local changes have not yet been pushed to Firestore
+let hasPendingCloudSync = false;
+
+function updateNetworkStatusUI() {
+    const badge = document.getElementById('network-status');
+    const label = document.getElementById('network-label');
+    const banner = document.getElementById('offline-banner');
+
+    if (navigator.onLine) {
+        if (badge) badge.className = 'network-status-badge online';
+        if (label) label.textContent = hasPendingCloudSync ? '同期待ち...' : 'オンライン';
+        if (banner) banner.style.display = 'none';
+    } else {
+        if (badge) badge.className = 'network-status-badge offline';
+        if (label) label.textContent = 'オフライン';
+        if (banner) banner.style.display = 'flex';
+    }
+}
+
+async function handleOnline() {
+    updateNetworkStatusUI();
+    // Push any locally-queued changes to Firestore when connection is restored
+    if (hasPendingCloudSync && currentUser && db) {
+        await saveToCloud();
+    }
+    updateNetworkStatusUI();
+}
+
 function initFirebase() {
     if (window.firebase && state.settings && state.settings.firebaseConfig) {
         try {
@@ -451,6 +484,15 @@ function initFirebase() {
                 firebase.initializeApp(state.settings.firebaseConfig);
             }
             db = firebase.firestore();
+            // Enable offline persistence so writes are queued locally when offline
+            // and automatically synced when the connection is restored.
+            db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+                // failed-precondition: multiple tabs open (only one tab gets persistence)
+                // unimplemented: browser does not support IndexedDB
+                if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+                    console.warn('Firestore persistence error:', err);
+                }
+            });
             auth = firebase.auth();
             
             // Listen to auth state
@@ -504,6 +546,7 @@ async function fetchCloudData() {
             state.calories = cloudState.calories || {};
             state.expenses = cloudState.expenses || {};
             state.memos = cloudState.memos || [];
+            state.diary = cloudState.diary || {};
 
             // Re-render views
             renderDashboard();
@@ -545,21 +588,26 @@ async function saveToCloud() {
             pausedTimers: state.pausedTimers,
             calories: state.calories,
             expenses: state.expenses,
-            memos: state.memos
+            memos: state.memos,
+            diary: state.diary
         };
         await db.collection('users').doc(currentUser.uid).set(dataToSave);
-        
+
+        hasPendingCloudSync = false;
         if (syncStatus) {
             syncStatus.textContent = '同期済 ✓';
             syncStatus.style.color = 'var(--success-color)';
         }
+        updateNetworkStatusUI();
     } catch (e) {
         console.error("Error saving to cloud", e);
+        hasPendingCloudSync = true;
         const syncStatus = document.getElementById('sync-status');
         if (syncStatus) {
             syncStatus.textContent = '同期失敗 ✕';
             syncStatus.style.color = 'var(--danger-color)';
         }
+        updateNetworkStatusUI();
     }
 }
 
@@ -630,7 +678,12 @@ function init() {
     renderDashboard();
     fetchWeather();
     syncTimerUI();
-    
+
+    // Network status listeners
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', updateNetworkStatusUI);
+    updateNetworkStatusUI();
+
     // Delay slightly to ensure external scripts are loaded, then attempt auto-sync
     setTimeout(() => {
         initGAPI();
@@ -662,6 +715,11 @@ function switchView(viewId) {
         renderExpenseSection();
     } else if (viewId === 'schedule') {
         renderWeeklySchedule();
+    } else if (viewId === 'diary') {
+        const today = getTodayString();
+        const picker = document.getElementById('diary-date-picker');
+        if (picker && !picker.value) picker.value = today;
+        renderDiaryView(picker ? picker.value : today);
     } else if (viewId === 'settings') {
         // Auto-fill form
         const inputClientId = document.getElementById('setting-client-id');
@@ -684,6 +742,11 @@ function setupEventListeners() {
     navLinks.forEach(link => {
         link.addEventListener('click', () => switchView(link.dataset.view));
     });
+
+    const diaryDatePicker = document.getElementById('diary-date-picker');
+    if (diaryDatePicker) {
+        diaryDatePicker.addEventListener('change', () => renderDiaryView(diaryDatePicker.value));
+    }
 
     navReflection.addEventListener('click', openReflectionModal);
     btnCancelReflection.addEventListener('click', () => modalReflection.classList.remove('active'));
@@ -2725,6 +2788,143 @@ function renderWeeklySchedule() {
         col.appendChild(timelineDiv);
         grid.appendChild(col);
     }
+}
+
+// --- Diary ---
+
+function renderDiaryView(dateStr) {
+    if (!dateStr) return;
+    const panel = document.getElementById('diary-panel');
+    if (!panel) return;
+
+    const entry = state.diary[dateStr] || {};
+    const localNote = entry.localNote || '';
+    const docId = entry.docId;
+    const webViewLink = entry.webViewLink;
+
+    const dateDisplay = new Date(dateStr + 'T12:00:00').toLocaleDateString('ja-JP', {
+        year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+    });
+
+    let docSection;
+    if (docId && webViewLink) {
+        docSection = `
+            <div class="diary-doc-card linked">
+                <div class="diary-doc-info">
+                    <span class="diary-doc-icon">📄</span>
+                    <div>
+                        <div class="diary-doc-label">Googleドキュメント</div>
+                        <div class="diary-doc-name">Daily Flow 日記 - ${dateStr}</div>
+                    </div>
+                </div>
+                <a href="${webViewLink}" target="_blank" rel="noopener" class="btn primary diary-open-btn">
+                    開いて編集 ↗
+                </a>
+            </div>`;
+    } else {
+        const canCreate = gapiInited && gisInited;
+        docSection = `
+            <div class="diary-doc-card empty">
+                <div class="diary-doc-info">
+                    <span class="diary-doc-icon">📄</span>
+                    <div class="diary-doc-label" style="color:var(--text-secondary);">
+                        この日のGoogleドキュメントはまだありません
+                    </div>
+                </div>
+                <button id="btn-create-diary-doc" class="btn secondary" ${canCreate ? '' : 'disabled title="Google APIを初期化中..."'}>
+                    + ドキュメントを作成
+                </button>
+            </div>`;
+    }
+
+    panel.innerHTML = `
+        <h4 class="diary-date-heading">${dateDisplay}</h4>
+
+        ${docSection}
+
+        <div class="diary-note-section">
+            <label class="diary-note-label">📝 ローカルメモ <span class="diary-note-hint">（オフライン対応・自動保存）</span></label>
+            <textarea id="diary-local-note" class="diary-textarea" rows="14"
+                placeholder="今日学んだこと、気づいたこと、明日試すこと...">${localNote}</textarea>
+            <div class="diary-note-footer">
+                <span id="diary-save-status" class="diary-save-status">保存しました ✓</span>
+                <button id="btn-save-diary-note" class="btn primary">保存</button>
+            </div>
+        </div>
+    `;
+
+    // Create Google Doc
+    const createBtn = document.getElementById('btn-create-diary-doc');
+    if (createBtn) {
+        createBtn.addEventListener('click', () => createDiaryDoc(dateStr));
+    }
+
+    // Save local note
+    const saveBtn = document.getElementById('btn-save-diary-note');
+    const noteArea = document.getElementById('diary-local-note');
+    const saveStatus = document.getElementById('diary-save-status');
+
+    function saveDiaryNote() {
+        if (!state.diary[dateStr]) state.diary[dateStr] = {};
+        state.diary[dateStr].localNote = noteArea.value;
+        saveData();
+        if (saveStatus) {
+            saveStatus.style.opacity = '1';
+            setTimeout(() => { saveStatus.style.opacity = '0'; }, 2000);
+        }
+    }
+
+    if (saveBtn) saveBtn.addEventListener('click', saveDiaryNote);
+
+    // Ctrl+S / Cmd+S shortcut
+    if (noteArea) {
+        let _autoSaveTimer = null;
+        noteArea.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveDiaryNote();
+            }
+        });
+        // Auto-save after 3 seconds of inactivity
+        noteArea.addEventListener('input', () => {
+            clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = setTimeout(saveDiaryNote, 3000);
+        });
+    }
+}
+
+async function createDiaryDoc(dateStr) {
+    const btn = document.getElementById('btn-create-diary-doc');
+    if (btn) { btn.disabled = true; btn.textContent = '作成中...'; }
+
+    const doCreate = async () => {
+        try {
+            const title = `Daily Flow 日記 - ${dateStr}`;
+            const response = await gapi.client.drive.files.create({
+                resource: {
+                    name: title,
+                    mimeType: 'application/vnd.google-apps.document',
+                },
+                fields: 'id,webViewLink'
+            });
+
+            const { id: docId, webViewLink } = response.result;
+            if (!state.diary[dateStr]) state.diary[dateStr] = {};
+            state.diary[dateStr].docId = docId;
+            state.diary[dateStr].webViewLink = webViewLink;
+            saveData();
+            renderDiaryView(dateStr);
+        } catch (e) {
+            console.error('Diary doc creation failed:', e);
+            alert('Googleドキュメントの作成に失敗しました。\nGoogleアカウントへのアクセスを許可してください。');
+            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+        }
+    };
+
+    // Request a fresh access token (Drive scope included in SCOPES)
+    authCallback = doCreate;
+    isSilentAuthAttempt = false;
+    tokenClient.requestAccessToken({ prompt: '' });
 }
 
 // Start
