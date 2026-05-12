@@ -548,6 +548,26 @@ async function fetchCloudData() {
             state.memos = cloudState.memos || [];
             state.diary = cloudState.diary || {};
 
+            // If the cloud data is from a previous day, apply new-day logic now.
+            // loadData() already ran this for local data, but fetchCloudData() can
+            // overwrite lastDate with yesterday's value, causing tasks to vanish on refresh.
+            const today = getTodayString();
+            if (state.lastDate !== today) {
+                const carryOverTasks = state.tasks.filter(t => !t.completed && !t.isRoutine);
+                const routineTasks = state.routines.map(r => ({
+                    id: generateId(),
+                    text: r.text,
+                    duration: r.duration,
+                    tag: r.tag || 'タスク',
+                    date: today,
+                    completed: false,
+                    isRoutine: true
+                }));
+                state.tasks = [...carryOverTasks, ...routineTasks];
+                state.lastDate = today;
+                saveData(); // persists locally and queues cloud save
+            }
+
             // Re-render views
             renderDashboard();
             syncTimerUI();   // resume timer display if it was running on another device
