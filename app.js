@@ -3008,8 +3008,39 @@ async function createDiaryDoc(dateStr) {
     const btn = document.getElementById('btn-create-diary-doc');
     if (btn) { btn.disabled = true; btn.textContent = '作成中...'; }
 
+    // Lazy-initialize driveTokenClient from stored settings if initGAPI() hasn't run yet
+    // (e.g. called before the 1-second delay, or GIS script wasn't ready at init time)
+    if (!driveTokenClient) {
+        if (!window.google || !state.settings || !state.settings.clientId) {
+            alert('Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。');
+            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+            return;
+        }
+        driveTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: state.settings.clientId,
+            scope: DRIVE_SCOPE,
+            callback: (resp) => {
+                if (resp.error !== undefined) {
+                    console.error('Drive auth error:', resp.error);
+                    driveAuthCallback = null;
+                    return;
+                }
+                if (driveAuthCallback) {
+                    const fn = driveAuthCallback;
+                    driveAuthCallback = null;
+                    fn();
+                }
+            },
+        });
+    }
+
     const doCreate = async () => {
         try {
+            // Lazily load Drive API discovery if gapi.client.drive is not yet available
+            if (window.gapi && gapi.client && !gapi.client.drive) {
+                await gapi.client.load('drive', 'v3');
+            }
+
             const title = `Daily Flow 日記 - ${dateStr}`;
             const response = await gapi.client.drive.files.create({
                 resource: {
@@ -3032,12 +3063,6 @@ async function createDiaryDoc(dateStr) {
         }
     };
 
-    // Use the dedicated Drive token client so calendar sync is never affected
-    if (!driveTokenClient) {
-        alert('Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。');
-        if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
-        return;
-    }
     driveAuthCallback = doCreate;
     driveTokenClient.requestAccessToken({ prompt: '' });
 }
