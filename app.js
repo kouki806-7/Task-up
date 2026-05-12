@@ -130,6 +130,7 @@ const inputName = document.getElementById('task-name');
 const inputDuration = document.getElementById('task-duration');
 const inputRoutine = document.getElementById('task-routine');
 const inputTag = document.getElementById('task-tag');
+const inputDate = document.getElementById('task-date');
 const listActive = document.getElementById('active-task-list');
 const listCompleted = document.getElementById('completed-task-list');
 const countActive = document.getElementById('active-count');
@@ -194,8 +195,15 @@ const DISCOVERY_DOCS = [
     'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
     'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
 ];
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file';
-let tokenClient;
+// Calendar / Gmail scopes — kept separate from Drive so silent auth never fails
+// due to a new drive.file consent requirement.
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+let tokenClient;       // calendar + gmail
+let driveTokenClient;  // drive.file only — used exclusively for diary doc creation
+let driveAuthCallback = null;
+
 let gapiInited = false;
 let gisInited = false;
 let authCallback = null;
@@ -213,6 +221,7 @@ function initGAPI() {
         });
     }
     if (window.google && state.settings && state.settings.clientId) {
+        // Main token client: calendar + gmail (used for all existing sync flows)
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: state.settings.clientId,
             scope: SCOPES,
@@ -226,6 +235,23 @@ function initGAPI() {
                     return;
                 }
                 if (authCallback) authCallback();
+            },
+        });
+        // Drive token client: drive.file only — requested only when creating a diary doc
+        driveTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: state.settings.clientId,
+            scope: DRIVE_SCOPE,
+            callback: (resp) => {
+                if (resp.error !== undefined) {
+                    console.error('Drive auth error:', resp.error);
+                    driveAuthCallback = null;
+                    return;
+                }
+                if (driveAuthCallback) {
+                    const fn = driveAuthCallback;
+                    driveAuthCallback = null;
+                    fn();
+                }
             },
         });
         gisInited = true;
@@ -448,6 +474,7 @@ function resumePausedTimer(taskId) {
 let db = null;
 let auth = null;
 let currentUser = null;
+let _cloudFetchDone = false; // guard: fetch once per session, not on every auth token refresh
 
 // True when local changes have not yet been pushed to Firestore
 let hasPendingCloudSync = false;
@@ -508,10 +535,14 @@ function initFirebase() {
                     if(loggedInDiv) loggedInDiv.style.display = 'flex';
                     if(avatar) avatar.src = user.photoURL || '';
                     if(name) name.textContent = user.displayName || 'ユーザー';
-                    
-                    fetchCloudData();
+
+                    if (!_cloudFetchDone) {
+                        _cloudFetchDone = true;
+                        fetchCloudData();
+                    }
                 } else {
                     currentUser = null;
+                    _cloudFetchDone = false; // allow fresh fetch on next login
                     if(loggedOutDiv) loggedOutDiv.style.display = 'block';
                     if(loggedInDiv) loggedInDiv.style.display = 'none';
                 }
@@ -529,12 +560,18 @@ async function fetchCloudData() {
         const docSnap = await docRef.get();
         if (docSnap.exists) {
             const cloudState = docSnap.data();
-            
-            state.tasks = cloudState.tasks || [];
-            state.routines = cloudState.routines || [];
-            state.schedules = cloudState.schedules || [];
-            state.history = cloudState.history || {};
-            state.lastDate = cloudState.lastDate || '';
+            const today = getTodayString();
+            const cloudDate = cloudState.lastDate || '';
+
+            // ── Non-task state: always take from cloud ──
+            state.routines   = cloudState.routines   || [];
+            state.schedules  = cloudState.schedules  || [];
+            state.history    = cloudState.history    || {};
+            state.pausedTimers = cloudState.pausedTimers || [];
+            state.calories   = cloudState.calories   || {};
+            state.expenses   = cloudState.expenses   || {};
+            state.memos      = cloudState.memos      || [];
+            state.diary      = cloudState.diary      || {};
             if (cloudState.settings) {
                 state.settings = { ...state.settings, ...cloudState.settings };
             }
@@ -542,45 +579,46 @@ async function fetchCloudData() {
                 if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
                 state.timer = cloudState.timer;
             }
-            state.pausedTimers = cloudState.pausedTimers || [];
-            state.calories = cloudState.calories || {};
-            state.expenses = cloudState.expenses || {};
-            state.memos = cloudState.memos || [];
-            state.diary = cloudState.diary || {};
 
-            // If the cloud data is from a previous day, apply new-day logic now.
-            // loadData() already ran this for local data, but fetchCloudData() can
-            // overwrite lastDate with yesterday's value, causing tasks to vanish on refresh.
-            const today = getTodayString();
-            if (state.lastDate !== today) {
-                const carryOverTasks = state.tasks.filter(t => !t.completed && !t.isRoutine);
-                const routineTasks = state.routines.map(r => ({
-                    id: generateId(),
-                    text: r.text,
-                    duration: r.duration,
-                    tag: r.tag || 'タスク',
-                    date: today,
-                    completed: false,
-                    isRoutine: true
+            // ── Task reconciliation ──
+            if (cloudDate < today) {
+                // Cloud is from a previous day: apply new-day logic to cloud task list.
+                const carryOver = (cloudState.tasks || []).filter(t => !t.completed && !t.isRoutine);
+                const freshRoutines = state.routines.map(r => ({
+                    id: generateId(), text: r.text, duration: r.duration,
+                    tag: r.tag || 'タスク', date: today, completed: false, isRoutine: true
                 }));
-                state.tasks = [...carryOverTasks, ...routineTasks];
+                state.tasks = [...carryOver, ...freshRoutines];
                 state.lastDate = today;
-                saveData(); // persists locally and queues cloud save
+            } else if (cloudDate === today) {
+                // Cloud is current for today: merge to keep locally added tasks that
+                // haven't reached the cloud yet (e.g. added within the 2-s debounce window).
+                const cloudIds = new Set((cloudState.tasks || []).map(t => t.id));
+                const localOnly = state.tasks.filter(t => !cloudIds.has(t.id));
+                state.tasks = [...(cloudState.tasks || []), ...localOnly];
+                state.lastDate = today;
+            } else {
+                // Cloud is ahead (multi-device edge case): trust cloud completely.
+                state.tasks = cloudState.tasks || [];
+                state.lastDate = cloudState.lastDate;
             }
 
-            // Re-render views
+            // Persist the reconciled state and push to cloud
+            saveData();
+
+            // Re-render
             renderDashboard();
-            syncTimerUI();   // resume timer display if it was running on another device
+            syncTimerUI();
             if (document.getElementById('view-history').classList.contains('active')) renderHistoryCalendar();
             if (document.getElementById('view-schedule').classList.contains('active')) renderWeeklySchedule();
-            
+
             const syncStatus = document.getElementById('sync-status');
             if (syncStatus) {
                 syncStatus.textContent = '同期済 ✓';
                 syncStatus.style.color = 'var(--success-color)';
             }
         } else {
-            // First login, upload local data
+            // First login — upload local data to cloud
             saveToCloud();
         }
     } catch (e) {
@@ -632,41 +670,77 @@ async function saveToCloud() {
 }
 
 // --- Weather Fetch ---
+function isRainCode(c) {
+    return (c >= 51 && c <= 65) || (c >= 80 && c <= 82) || c >= 95;
+}
+
 async function fetchWeather() {
     const weatherDisplay = document.getElementById('weather-display');
     if (!weatherDisplay) return;
 
-    // Use Tokyo coordinates by default
     const lat = 35.6895;
     const lon = 139.6917;
 
     try {
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=Asia%2FTokyo`;
+        // Request current weather + hourly precipitation & weathercode for 2 days
+        // (2 days ensures we always have 12 hours ahead even late at night)
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
+            + `&current_weather=true`
+            + `&hourly=precipitation,weathercode`
+            + `&timezone=Asia%2FTokyo&forecast_days=2`;
+
         const response = await fetch(url);
         if (!response.ok) throw new Error('Network response was not ok');
         const data = await response.json();
-        
+
         const code = data.current_weather.weathercode;
-        
-        let icon = '🌤️'; // default
+
+        let icon = '🌤️';
         let desc = '不明';
+        if (code === 0)                        { icon = '☀️';  desc = '快晴'; }
+        else if (code <= 3)                    { icon = '⛅';  desc = '晴れ/曇り'; }
+        else if (code === 45 || code === 48)   { icon = '🌫️'; desc = '霧'; }
+        else if (code >= 51 && code <= 55)     { icon = '🌧️'; desc = '霧雨'; }
+        else if (code >= 61 && code <= 65)     { icon = '☔';  desc = '雨'; }
+        else if (code >= 71 && code <= 75)     { icon = '⛄';  desc = '雪'; }
+        else if (code >= 80 && code <= 82)     { icon = '🌦️'; desc = 'にわか雨'; }
+        else if (code >= 85 && code <= 86)     { icon = '🌨️'; desc = '雪'; }
+        else if (code >= 95)                   { icon = '⛈️'; desc = '雷雨'; }
 
-        // WMO Weather interpretation codes (https://open-meteo.com/en/docs)
-        if (code === 0) { icon = '☀️'; desc = '快晴'; }
-        else if (code === 1 || code === 2 || code === 3) { icon = '⛅'; desc = '晴れ/曇り'; }
-        else if (code === 45 || code === 48) { icon = '🌫️'; desc = '霧'; }
-        else if (code >= 51 && code <= 55) { icon = '🌧️'; desc = '霧雨'; }
-        else if (code >= 61 && code <= 65) { icon = '☔'; desc = '雨'; }
-        else if (code >= 71 && code <= 75) { icon = '⛄'; desc = '雪'; }
-        else if (code >= 80 && code <= 82) { icon = '🌦️'; desc = 'にわか雨'; }
-        else if (code >= 85 && code <= 86) { icon = '🌨️'; desc = '雪'; }
-        else if (code >= 95) { icon = '⛈️'; desc = '雷雨'; }
+        // ── 12-hour rain forecast ──
+        const times  = data.hourly.time;          // "YYYY-MM-DDTHH:00"
+        const precip = data.hourly.precipitation; // mm
+        const hCode  = data.hourly.weathercode;
 
-        weatherDisplay.textContent = icon;
-        weatherDisplay.title = `${desc} (${data.current_weather.temperature}℃)`;
+        // Find the index for the current hour
+        const now = new Date();
+        const padZ = n => String(n).padStart(2, '0');
+        const currentHourStr = `${now.getFullYear()}-${padZ(now.getMonth()+1)}-${padZ(now.getDate())}T${padZ(now.getHours())}:00`;
+        const curIdx = times.indexOf(currentHourStr);
+
+        let rainBadgeHtml = '';
+        if (curIdx !== -1) {
+            // Look at hours +1 … +12 (skip the current hour; weather icon already covers it)
+            let rainOffset = -1;
+            for (let i = 1; i <= 12; i++) {
+                const idx = curIdx + i;
+                if (idx >= times.length) break;
+                if (precip[idx] > 0 || isRainCode(hCode[idx])) {
+                    rainOffset = i;
+                    break;
+                }
+            }
+
+            if (rainOffset !== -1) {
+                const label = rainOffset === 1 ? '約1時間後' : `約${rainOffset}時間後`;
+                rainBadgeHtml = `<span class="rain-forecast-badge" title="${label}に雨の予報">☔ ${label}</span>`;
+            }
+        }
+
+        weatherDisplay.innerHTML = `<span title="${desc} (${data.current_weather.temperature}℃)">${icon}</span>${rainBadgeHtml}`;
     } catch (e) {
         console.error("Weather fetch failed:", e);
-        weatherDisplay.textContent = '☁️';
+        weatherDisplay.innerHTML = '☁️';
         weatherDisplay.title = '天気情報が取得できませんでした';
     }
 }
@@ -773,19 +847,36 @@ function setupEventListeners() {
     btnSaveReflection.addEventListener('click', saveReflection);
 
     // Adding Task
+    // Set date picker default to today
+    if (inputDate) inputDate.value = getTodayString();
+
+    // Hide/show date picker based on routine selection
+    if (inputRoutine && inputDate) {
+        inputRoutine.addEventListener('change', () => {
+            inputDate.closest('.input-group').style.opacity = inputRoutine.value === 'true' ? '0.4' : '1';
+            inputDate.disabled = inputRoutine.value === 'true';
+        });
+    }
+
     formAdd.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = inputName.value.trim();
         const duration = parseInt(inputDuration.value) || 0;
         const isRoutine = inputRoutine.value === 'true';
         const tag = inputTag.value;
+        const targetDate = (!isRoutine && inputDate && inputDate.value) ? inputDate.value : getTodayString();
 
         if (text) {
-            addTask(text, duration, isRoutine, tag);
+            addTask(text, duration, isRoutine, tag, targetDate);
             inputName.value = '';
             inputDuration.value = '';
             inputRoutine.value = 'false';
             inputTag.value = 'タスク';
+            if (inputDate) {
+                inputDate.value = getTodayString();
+                inputDate.disabled = false;
+                inputDate.closest('.input-group').style.opacity = '1';
+            }
         }
     });
 
@@ -2941,10 +3032,14 @@ async function createDiaryDoc(dateStr) {
         }
     };
 
-    // Request a fresh access token (Drive scope included in SCOPES)
-    authCallback = doCreate;
-    isSilentAuthAttempt = false;
-    tokenClient.requestAccessToken({ prompt: '' });
+    // Use the dedicated Drive token client so calendar sync is never affected
+    if (!driveTokenClient) {
+        alert('Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。');
+        if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+        return;
+    }
+    driveAuthCallback = doCreate;
+    driveTokenClient.requestAccessToken({ prompt: '' });
 }
 
 // Start

@@ -105,7 +105,7 @@
                             <div class="input-group">
                                 <input type="text" id="task-name" placeholder="タスク名を入力..." required>
                             </div>
-                            <div class="input-row" style="margin-bottom: 1rem;">
+                            <div class="input-row" style="margin-bottom: 0.75rem;">
                                 <div class="input-group" style="width: 140px; margin-bottom: 0;">
                                     <select id="task-tag" style="width: 100%; padding: 12px 16px; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem;">
                                         <option value="タスク" style="color: #000">タスク</option>
@@ -123,6 +123,11 @@
                                         <option value="false" style="color: #000">今日だけ</option>
                                         <option value="true" style="color: #000">毎日</option>
                                     </select>
+                                </div>
+                            </div>
+                            <div class="input-row" style="margin-bottom: 1rem;">
+                                <div class="input-group" style="flex: 1; margin-bottom: 0;">
+                                    <input type="date" id="task-date" style="width: 100%; padding: 12px 16px; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem; cursor: pointer;">
                                 </div>
                                 <button type="submit" class="btn primary" style="white-space: nowrap;">追加</button>
                             </div>

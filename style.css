@@ -1547,6 +1547,23 @@ textarea {
     transition: opacity 0.3s;
 }
 
+/* ── Rain Forecast Badge ── */
+.rain-forecast-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 20px;
+    background: rgba(96, 165, 250, 0.18);
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    color: #93c5fd;
+    vertical-align: middle;
+    white-space: nowrap;
+    cursor: default;
+}
+
 /* ── Offline / Network Status ── */
 .network-status-badge {
     display: flex;
