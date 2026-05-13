@@ -243,8 +243,15 @@ function initGAPI() {
             scope: DRIVE_SCOPE,
             callback: (resp) => {
                 if (resp.error !== undefined) {
-                    console.error('Drive auth error:', resp.error);
+                    console.error('[Drive auth]', resp.error);
+                    if (resp.error === 'interaction_required' || resp.error === 'access_denied') {
+                        // Silent auth failed — show explicit consent/account-picker screen
+                        driveTokenClient.requestAccessToken({ prompt: 'consent' });
+                        return;
+                    }
                     driveAuthCallback = null;
+                    const btn = document.getElementById('btn-create-diary-doc');
+                    if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
                     return;
                 }
                 if (driveAuthCallback) {
@@ -3008,30 +3015,37 @@ async function createDiaryDoc(dateStr) {
     const btn = document.getElementById('btn-create-diary-doc');
     if (btn) { btn.disabled = true; btn.textContent = '作成中...'; }
 
-    // Lazy-initialize driveTokenClient from stored settings if initGAPI() hasn't run yet
-    // (e.g. called before the 1-second delay, or GIS script wasn't ready at init time)
+    console.log('[Diary] createDiaryDoc — driveTokenClient:', !!driveTokenClient,
+        'gisInited:', gisInited, 'gapiInited:', gapiInited,
+        'window.google:', !!window.google,
+        'clientId:', state.settings?.clientId ? '設定済み' : '未設定');
+
+    // If driveTokenClient isn't ready, re-run initGAPI() (GIS script may have loaded
+    // after the initial 1-second delay)
     if (!driveTokenClient) {
-        if (!window.google || !state.settings || !state.settings.clientId) {
-            alert('Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。');
+        if (!window.google) {
+            console.error('[Diary] window.google が未定義 — GISスクリプトの読み込み失敗');
+            alert('Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。');
             if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
             return;
         }
-        driveTokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: state.settings.clientId,
-            scope: DRIVE_SCOPE,
-            callback: (resp) => {
-                if (resp.error !== undefined) {
-                    console.error('Drive auth error:', resp.error);
-                    driveAuthCallback = null;
-                    return;
-                }
-                if (driveAuthCallback) {
-                    const fn = driveAuthCallback;
-                    driveAuthCallback = null;
-                    fn();
-                }
-            },
-        });
+        if (!state.settings?.clientId) {
+            console.error('[Diary] clientId が設定されていません');
+            alert('設定画面でGoogle Client IDを入力してください。');
+            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+            return;
+        }
+        console.log('[Diary] driveTokenClient が null のため initGAPI() を再実行します');
+        initGAPI();
+        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log('[Diary] initGAPI() 再実行後 driveTokenClient:', !!driveTokenClient);
+    }
+
+    if (!driveTokenClient) {
+        console.error('[Diary] initGAPI() 後も driveTokenClient が null');
+        alert('Drive APIの初期化に失敗しました。ページを再読み込みしてください。');
+        if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+        return;
     }
 
     const doCreate = async () => {
