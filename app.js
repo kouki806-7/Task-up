@@ -45,6 +45,9 @@ function loadData() {
     if (saved) {
         state = JSON.parse(saved);
         if (!state.schedules) state.schedules = [];
+        if (!state.tasks) state.tasks = [];
+        if (!state.routines) state.routines = [];
+        if (!state.history) state.history = {};
         if (!state.settings) {
             state.settings = {
                 apiKey: 'AIzaSyDy-UDkVaLk5zLkojM3IOtzPZTwFpCtfSA',
@@ -55,13 +58,6 @@ function loadData() {
         }
         if (!state.settings.layoutMode) state.settings.layoutMode = 'auto';
         if (!state.settings.googleEmail) state.settings.googleEmail = null;
-        // Migrate single mailFromFilter string → mailFromFilters array
-        if (!state.settings.mailFromFilters) {
-            const old = state.settings.mailFromFilter || '';
-            state.settings.mailFromFilters = old ? [{ address: old, inBody: false }] : [];
-            delete state.settings.mailFromFilter;
-        }
-        if (state.settings.mailToFilter === undefined) state.settings.mailToFilter = '';
         state.tasks.forEach(t => {
             if (!t.date) t.date = getTodayString();
         });
@@ -122,8 +118,6 @@ function generateId() {
 // Views
 const views = document.querySelectorAll('.view');
 const navLinks = document.querySelectorAll('.nav-links li[data-view]');
-const navReflection = document.getElementById('nav-reflection');
-
 // Dashboard
 const formAdd = document.getElementById('add-task-form');
 const inputName = document.getElementById('task-name');
@@ -145,13 +139,6 @@ const progressText = document.getElementById('progress-text');
 // Smart Import
 const inputGcal = document.getElementById('gcal-import');
 const btnImport = document.getElementById('btn-import');
-
-// Reflection Modal
-const modalReflection = document.getElementById('reflection-modal');
-const btnSaveReflection = document.getElementById('btn-save-reflection');
-const btnCancelReflection = document.getElementById('btn-cancel-reflection');
-const textFeeling = document.getElementById('reflection-feeling');
-const textLearned = document.getElementById('reflection-learned');
 
 // History Calendar
 const calendarMonthYear = document.getElementById('calendar-month-year');
@@ -197,7 +184,7 @@ const DISCOVERY_DOCS = [
 ];
 // Calendar / Gmail scopes — kept separate from Drive so silent auth never fails
 // due to a new drive.file consent requirement.
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 let tokenClient;       // calendar + gmail
@@ -849,10 +836,6 @@ function setupEventListeners() {
         diaryDatePicker.addEventListener('change', () => renderDiaryView(diaryDatePicker.value));
     }
 
-    navReflection.addEventListener('click', openReflectionModal);
-    btnCancelReflection.addEventListener('click', () => modalReflection.classList.remove('active'));
-    btnSaveReflection.addEventListener('click', saveReflection);
-
     // Adding Task
     // Set date picker default to today
     if (inputDate) inputDate.value = getTodayString();
@@ -1300,23 +1283,6 @@ function setupEventListeners() {
         });
     }
 
-    const btnFetchMail = document.getElementById('btn-fetch-mail');
-    if (btnFetchMail) btnFetchMail.addEventListener('click', fetchGmailMessages);
-
-    const btnAddFromNormal = document.getElementById('btn-add-from-normal');
-    if (btnAddFromNormal) btnAddFromNormal.addEventListener('click', () => addMailFromFilter(false));
-
-    const btnAddFromForward = document.getElementById('btn-add-from-forward');
-    if (btnAddFromForward) btnAddFromForward.addEventListener('click', () => addMailFromFilter(true));
-
-    const mailFromAddInput = document.getElementById('mail-from-add-input');
-    if (mailFromAddInput) {
-        mailFromAddInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') { e.preventDefault(); addMailFromFilter(false); }
-        });
-    }
-
-    renderMailAddressTabs();
 }
 
 function applyLayoutMode() {
@@ -1502,9 +1468,11 @@ async function fetchGoogleCalendarEvents(silent = false) {
         const gcalSyncEl = document.getElementById('gcal-last-sync');
         if (gcalSyncEl) gcalSyncEl.textContent = `GCal 最終同期: ${timeStr}`;
 
-        const taskMsg = taskAdded > 0 ? `\nタスク自動登録(manaba): ${taskAdded}件` : '';
-        alert(`Googleカレンダーと自動同期しました！\n（新規: ${added}件, 更新: ${updated}件）${taskMsg}`);
-        console.log(`[Auto-sync] done. added=${added}, updated=${updated}, taskAdded=${taskAdded}`);
+        console.log(`[GCal] done. added=${added}, updated=${updated}, taskAdded=${taskAdded}`);
+        if (!silent) {
+            const taskMsg = taskAdded > 0 ? `\nタスク自動登録(manaba): ${taskAdded}件` : '';
+            alert(`Googleカレンダーと自動同期しました！\n（新規: ${added}件, 更新: ${updated}件）${taskMsg}`);
+        }
         
     } catch (err) {
         console.error(err);
@@ -1523,402 +1491,6 @@ function autoSyncGoogleCalendar() {
     if (!gapiInited || !gisInited) return;
     if (gapi.client.getToken() === null) return;
     fetchGoogleCalendarEvents(true);
-}
-
-// --- Gmail / Mail View ---
-let mailCache = {};          // cacheKey → { messages: [], fetchedAt: timestamp }
-let selectedMailFilterIdx = -1;
-
-function decodeBase64Url(str) {
-    try {
-        const base64 = str.replace(/-/g, '+').replace(/_/g, '/');
-        const binary = atob(base64);
-        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-        return new TextDecoder('utf-8').decode(bytes);
-    } catch { return ''; }
-}
-
-function findMailPart(parts, mimeType) {
-    for (const p of parts) {
-        if (p.mimeType === mimeType) return p;
-        if (p.parts) { const f = findMailPart(p.parts, mimeType); if (f) return f; }
-    }
-    return null;
-}
-
-function extractMailBody(payload) {
-    if (!payload) return { type: 'plain', content: '' };
-    if (payload.body && payload.body.data) {
-        const type = (payload.mimeType || '').includes('html') ? 'html' : 'plain';
-        return { type, content: decodeBase64Url(payload.body.data) };
-    }
-    if (payload.parts) {
-        for (const [mime, type] of [['text/plain', 'plain'], ['text/html', 'html']]) {
-            const part = findMailPart(payload.parts, mime);
-            if (part && part.body && part.body.data) {
-                return { type, content: decodeBase64Url(part.body.data) };
-            }
-        }
-    }
-    return { type: 'plain', content: '(本文を取得できませんでした)' };
-}
-
-function getMailHeader(headers, name) {
-    const h = (headers || []).find(h => h.name.toLowerCase() === name.toLowerCase());
-    return h ? h.value : '';
-}
-
-// --- Mail summarization (ported from LINE project summarize.js) ---
-const MAIL_IMPORTANT_PATTERNS = [
-    /締[切め]|期限|期日|〆切|デッドライン/,
-    /\d+月\d+日|\d+\/\d+|今月|来月|今週|来週|月曜|火曜|水曜|木曜|金曜|土曜|日曜/,
-    /\d+:\d+|午前|午後|朝|昼|夜/,
-    /提出|返信|回答|回覧|確認|対応|お願い|連絡|手続き|申請|登録|入力|送付|送信/,
-    /必要|重要|必須|至急|緊急|注意|お知らせ/,
-    /円|料金|費用|支払|振込|納付/,
-];
-
-function extractBodyText(payload) {
-    const { content } = extractMailBody(payload);
-    return content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function mailSplitSentences(text) {
-    return text
-        .replace(/\r\n/g, '\n')
-        .split(/[。！？\n]+/)
-        .map(s => s.trim())
-        .filter(s => s.length > 8 && s.length < 200);
-}
-
-function mailScoreText(text) {
-    return MAIL_IMPORTANT_PATTERNS.filter(p => p.test(text)).length;
-}
-
-function extractKeywordSummary(subject, body) {
-    const lines = [];
-    if (mailScoreText(subject) > 0) lines.push(`【件名】${subject}`);
-    if (!body) return lines.length ? lines.join('\n') : `件名: ${subject}`;
-    const sentences = mailSplitSentences(body);
-    const scored = sentences
-        .map(s => ({ text: s, score: mailScoreText(s) }))
-        .filter(s => s.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5);
-    scored.forEach(s => lines.push(s.text));
-    if (lines.length === 0) sentences.slice(0, 2).forEach(s => lines.push(s));
-    return lines.length ? lines.join('\n') : `件名: ${subject}（本文要約なし）`;
-}
-
-async function summarizeWithGemini(subject, bodyText) {
-    const apiKey = state.settings.apiKey;
-    if (!apiKey) throw new Error('no key');
-    const prompt = `以下のメールを日本語で3行以内に簡潔に要約してください。重要な締切・日時・必要なアクションがあれば必ず含めてください。\n\n件名: ${subject}\n\n本文:\n${bodyText.slice(0, 2500)}`;
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { maxOutputTokens: 200, temperature: 0.3 }
-            })
-        }
-    );
-    if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(`Gemini ${res.status}: ${(errData.error && errData.error.message) || ''}`);
-    }
-    const data = await res.json();
-    return (data.candidates && data.candidates[0] && data.candidates[0].content &&
-            data.candidates[0].content.parts && data.candidates[0].content.parts[0] &&
-            data.candidates[0].content.parts[0].text || '').trim();
-}
-
-function renderMailAddressTabs() {
-    const container = document.getElementById('mail-address-tabs');
-    if (!container) return;
-    const filters = state.settings.mailFromFilters || [];
-    container.innerHTML = '';
-    if (filters.length === 0) {
-        container.innerHTML = '<span style="font-size:0.83rem;color:var(--text-secondary);">差出人が未登録です。下のフォームから追加してください。</span>';
-        return;
-    }
-    filters.forEach((f, i) => {
-        const isActive = i === selectedMailFilterIdx;
-        const tab = document.createElement('div');
-        tab.className = `mail-addr-tab${isActive ? ' active' : ''}${f.inBody ? ' forwarded' : ''}`;
-        tab.innerHTML = `
-            <span class="tab-label" onclick="selectMailFilter(${i})">
-                ${f.inBody ? '<span class="chip-badge" style="margin-right:3px;">転送元</span>' : ''}
-                ${f.address.replace(/</g, '&lt;')}
-            </span>
-            <button class="tab-delete" onclick="removeMailFromFilter(${i})" aria-label="削除">×</button>
-        `;
-        container.appendChild(tab);
-    });
-}
-
-function renderMailFeed(messages) {
-    const feed = document.getElementById('mail-feed');
-    if (!feed) return;
-    if (!messages || messages.length === 0) {
-        feed.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
-        return;
-    }
-    feed.innerHTML = '';
-    messages.forEach(msg => {
-        const headers = (msg.payload && msg.payload.headers) || [];
-        const subject = getMailHeader(headers, 'Subject') || '(件名なし)';
-        const from = getMailHeader(headers, 'From') || '';
-        const dateRaw = getMailHeader(headers, 'Date');
-        let dateStr = '', timeStr = '';
-        try {
-            const d = new Date(dateRaw);
-            dateStr = d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' });
-            timeStr = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-        } catch {}
-        const summary = (msg._summary || '').replace(/</g, '&lt;');
-        const isAI = !!msg._summaryIsAI;
-        const safeId = msg.id.replace(/[^a-zA-Z0-9]/g, '');
-        const card = document.createElement('div');
-        card.className = 'mail-feed-card';
-        card.innerHTML = `
-            <div class="mail-feed-header">
-                <span class="mail-feed-date">${dateStr}</span>
-                <span class="mail-feed-time">${timeStr}</span>
-                ${summary ? `<span id="mbadge-${safeId}" class="summary-badge ${isAI ? 'ai' : 'keyword'}">${isAI ? 'AI' : '抽出'}</span>` : ''}
-            </div>
-            <div class="mail-feed-subject">${subject.replace(/</g, '&lt;')}</div>
-            ${summary ? `<div id="msum-${safeId}" class="mail-feed-summary">${summary}</div>` : ''}
-        `;
-        card.addEventListener('click', () => loadMailBody(msg.id, subject, from, `${dateStr} ${timeStr}`));
-        feed.appendChild(card);
-    });
-}
-
-function requestGmailAuth() {
-    authCallback = fetchGmailMessages;
-    tokenClient.requestAccessToken({ prompt: 'consent' });
-}
-
-async function selectMailFilter(idx) {
-    selectedMailFilterIdx = idx;
-    renderMailAddressTabs();
-    closeMailDetail();
-    const filters = state.settings.mailFromFilters || [];
-    const filter = filters[idx];
-    if (!filter) return;
-
-    // ユーザージェスチャー内でトークンがなければ即座に認証（awaitの前に呼ぶことでポップアップが許可される）
-    if (gapiInited && gisInited && gapi.client.getToken() === null) {
-        authCallback = fetchGmailMessages;
-        tokenClient.requestAccessToken({ prompt: 'consent' });
-        return;
-    }
-
-    const cacheKey = `${filter.address}:${filter.inBody}`;
-    const cached = mailCache[cacheKey];
-    if (cached) {
-        renderMailFeed(cached.messages);
-    } else {
-        await fetchGmailMessages();
-    }
-}
-
-async function loadMailBody(msgId, subject, from, dateStr) {
-    const detailPanel = document.getElementById('mail-detail-panel');
-    const detailSubject = document.getElementById('mail-detail-subject');
-    const detailMeta = document.getElementById('mail-detail-meta');
-    const detailBody = document.getElementById('mail-detail-body');
-    if (!detailPanel) return;
-    detailSubject.textContent = subject;
-    detailMeta.innerHTML = `<strong>差出人:</strong> ${from.replace(/</g, '&lt;')}<br><strong>日時:</strong> ${dateStr}`;
-    detailBody.innerHTML = '<p style="color:var(--text-secondary);font-size:0.9rem;">読み込み中...</p>';
-    detailPanel.style.display = 'block';
-    detailPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    try {
-        const resp = await gapi.client.request({
-            path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}`,
-            params: { format: 'full' }
-        });
-        const { type, content } = extractMailBody(resp.result.payload);
-        if (type === 'html') {
-            const iframe = document.createElement('iframe');
-            iframe.sandbox = 'allow-same-origin';
-            iframe.style.cssText = 'width:100%;border:none;border-radius:6px;background:#fff;display:block;';
-            iframe.style.minHeight = '200px';
-            detailBody.innerHTML = '';
-            detailBody.appendChild(iframe);
-            requestAnimationFrame(() => {
-                iframe.contentDocument.open();
-                iframe.contentDocument.write(content);
-                iframe.contentDocument.close();
-                setTimeout(() => { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px'; }, 100);
-            });
-        } else {
-            detailBody.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-size:0.88rem;line-height:1.65;margin:0;">${content.replace(/</g, '&lt;')}</pre>`;
-        }
-    } catch (err) {
-        console.error('[Gmail body]', err);
-        detailBody.innerHTML = `<p style="color:var(--danger-color);">取得に失敗しました: ${err.message || ''}</p>`;
-    }
-}
-
-function closeMailDetail() {
-    const panel = document.getElementById('mail-detail-panel');
-    if (panel) panel.style.display = 'none';
-}
-
-function addMailFromFilter(inBody) {
-    const input = document.getElementById('mail-from-add-input');
-    if (!input) return;
-    const address = input.value.trim();
-    if (!address) return;
-    if (!state.settings.mailFromFilters) state.settings.mailFromFilters = [];
-    if (state.settings.mailFromFilters.some(f => f.address === address)) {
-        input.value = '';
-        return;
-    }
-    state.settings.mailFromFilters.push({ address, inBody });
-    saveData();
-    renderMailAddressTabs();
-    input.value = '';
-}
-
-function removeMailFromFilter(index) {
-    if (!state.settings.mailFromFilters) return;
-    state.settings.mailFromFilters.splice(index, 1);
-    if (selectedMailFilterIdx === index) {
-        selectedMailFilterIdx = -1;
-        const feed = document.getElementById('mail-feed');
-        if (feed) feed.innerHTML = '<p class="empty-state">差出人を選択してください。</p>';
-        closeMailDetail();
-    } else if (selectedMailFilterIdx > index) {
-        selectedMailFilterIdx--;
-    }
-    saveData();
-    renderMailAddressTabs();
-}
-
-async function fetchGmailMessages() {
-    const feed = document.getElementById('mail-feed');
-    if (!feed) return;
-    if (!gapiInited || !gisInited) {
-        feed.innerHTML = '<p class="empty-state">Google APIが初期化されていません。設定を確認してください。</p>';
-        return;
-    }
-    const filters = state.settings.mailFromFilters || [];
-    if (selectedMailFilterIdx < 0 || selectedMailFilterIdx >= filters.length) {
-        feed.innerHTML = '<p class="empty-state">差出人タブを選択してください。</p>';
-        return;
-    }
-    const filter = filters[selectedMailFilterIdx];
-    const cacheKey = `${filter.address}:${filter.inBody}`;
-    feed.innerHTML = '<p class="empty-state" style="opacity:0.6;">メールを取得中...</p>';
-    closeMailDetail();
-    try {
-        const query = filter.inBody ? `"${filter.address}"` : `from:${filter.address}`;
-        const listResp = await gapi.client.request({
-            path: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-            params: { q: query, maxResults: 20 }
-        });
-        const messages = listResp.result.messages;
-        if (!messages || messages.length === 0) {
-            mailCache[cacheKey] = { messages: [], fetchedAt: Date.now() };
-            feed.innerHTML = '<p class="empty-state">メールが見つかりませんでした。</p>';
-            return;
-        }
-
-        // Step 1: fetch metadata for all → immediate display using snippet
-        const metaResps = await Promise.allSettled(
-            messages.map(m => gapi.client.request({
-                path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}`,
-                params: { format: 'metadata' }
-            }))
-        );
-        const processed = metaResps
-            .filter(r => r.status === 'fulfilled')
-            .map(r => {
-                const msg = r.value.result;
-                const headers = (msg.payload && msg.payload.headers) || [];
-                const subject = getMailHeader(headers, 'Subject') || '';
-                return { ...msg, _subject: subject, _bodyText: '', _summary: msg.snippet || '', _summaryIsAI: false };
-            });
-
-        if (processed.length === 0) {
-            feed.innerHTML = '<p class="empty-state">メールの取得に失敗しました。</p>';
-            return;
-        }
-
-        mailCache[cacheKey] = { messages: processed, fetchedAt: Date.now() };
-        renderMailFeed(processed);
-
-        // Step 2: background — fetch full body per message → keyword → AI
-        processed.forEach(async msg => {
-            try {
-                const fullResp = await gapi.client.request({
-                    path: `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-                    params: { format: 'full' }
-                });
-                const bodyText = extractBodyText(fullResp.result.payload);
-                msg._bodyText = bodyText;
-                const keywordSummary = extractKeywordSummary(msg._subject, bodyText);
-                updateMailCard(msg.id, keywordSummary, false, cacheKey);
-
-                // Try Gemini upgrade
-                const aiSummary = await summarizeWithGemini(msg._subject, bodyText);
-                if (aiSummary) updateMailCard(msg.id, aiSummary, true, cacheKey);
-            } catch (e) {
-                // Keep snippet or keyword summary
-            }
-        });
-
-    } catch (err) {
-        console.error('[Gmail]', err);
-        const status = err.status || (err.result && err.result.error && err.result.error.code);
-        if (status === 401 || status === 403) {
-            const token = gapi.client.getToken();
-            const grantedScopes = token ? (token.scope || '') : '';
-            const hasGmail = grantedScopes.includes('gmail.readonly');
-            console.log('[Gmail auth] granted scopes:', grantedScopes);
-            authCallback = fetchGmailMessages;
-            feed.innerHTML = `
-                <div style="padding:1.5rem; font-size:0.9rem; line-height:1.7;">
-                    <p style="color:var(--danger-color); font-weight:600; margin-bottom:0.75rem;">⚠ Gmail APIアクセスエラー (403)</p>
-                    <p style="color:var(--text-secondary); margin-bottom:0.5rem;">付与済みスコープ: <code style="font-size:0.8rem; background:rgba(0,0,0,0.3); padding:0.1rem 0.4rem; border-radius:3px;">${grantedScopes || '(なし)'}</code></p>
-                    <p style="color:var(--text-secondary); margin-bottom:1rem;">gmail.readonly: <strong style="color:${hasGmail ? 'var(--success-color)' : 'var(--danger-color)'};">${hasGmail ? '✓ 付与済み' : '✗ 未付与'}</strong></p>
-                    ${!hasGmail ? `
-                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.85rem;">
-                        Google Cloud Console で以下の設定が必要です：<br>
-                        ① Gmail API を有効化<br>
-                        ② OAuth同意画面 → スコープに <code>gmail.readonly</code> を追加<br>
-                        ③ テストユーザーに自分のアドレスを追加
-                    </p>
-                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.65rem 1.5rem;">再度アクセスを許可する</button>
-                    ` : `
-                    <p style="color:var(--text-secondary); margin-bottom:1rem; font-size:0.85rem;">スコープは付与済みですが拒否されています。Gmail APIが有効か確認してください。</p>
-                    <button class="btn primary" onclick="requestGmailAuth()" style="padding:0.65rem 1.5rem;">再認証する</button>
-                    `}
-                </div>`;
-        } else {
-            const msg = (err.message || '取得に失敗しました').replace(/</g, '&lt;');
-            feed.innerHTML = `<p class="empty-state">エラー: ${msg}</p>`;
-        }
-    }
-}
-
-function updateMailCard(msgId, summary, isAI, cacheKey) {
-    const cached = mailCache[cacheKey];
-    if (cached) {
-        const m = cached.messages.find(m => m.id === msgId);
-        if (m) { m._summary = summary; m._summaryIsAI = isAI; }
-    }
-    const safeId = msgId.replace(/[^a-zA-Z0-9]/g, '');
-    const sumEl = document.getElementById(`msum-${safeId}`);
-    const badgeEl = document.getElementById(`mbadge-${safeId}`);
-    if (sumEl) { sumEl.textContent = summary; if (isAI) sumEl.classList.add('ai-upgraded'); }
-    if (badgeEl) { badgeEl.textContent = isAI ? 'AI' : '抽出'; badgeEl.className = `summary-badge ${isAI ? 'ai' : 'keyword'}`; }
 }
 
 // --- Memo (タスク未満) ---
@@ -1992,9 +1564,16 @@ function smartParse(rawText, importType = 'task') {
             if (endMins < startMins) endMins += 24 * 60; // crossed midnight
             
             if (importType === 'schedule') {
-                // Simplified schedule logic for parsing
-                const day = new Date().getDay();
-                state.schedules.push({ id: generateId(), title: name, dayIndex: day, startHour: sh + sm/60, endHour: eh + em/60, tag: 'カレンダー', memo: '' });
+                const pad = n => String(n).padStart(2, '0');
+                state.schedules.push({
+                    id: generateId(),
+                    title: name,
+                    date: getTodayString(),
+                    startTime: `${pad(sh)}:${pad(sm)}`,
+                    endTime: `${pad(eh)}:${pad(em)}`,
+                    tag: 'カレンダー',
+                    memo: ''
+                });
             } else {
                 const duration = endMins - startMins;
                 addTask(name, duration, false, 'カレンダー', getTodayString());
@@ -2097,82 +1676,12 @@ function updateProgressRing(completed, total) {
     if (total === 0) {
         progressText.textContent = "タスクを追加して計画を立てましょう。";
     } else if (percent === 100) {
-        progressText.textContent = "すべて完了しました！振り返りをしましょう。";
+        progressText.textContent = "すべて完了しました！お疲れ様でした。";
         progressRing.style.stroke = "var(--success-color)";
     } else {
         progressText.textContent = "その調子！頑張りましょう。";
         progressRing.style.stroke = "var(--primary-color)";
     }
-}
-
-// --- Reflection Modal ---
-function isReflectionTime() {
-    const h = new Date().getHours();
-    return h >= 22 || h < 2;
-}
-
-function openReflectionModal() {
-    const total = state.tasks.length;
-    const completed = state.tasks.filter(t => t.completed).length;
-    const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
-
-    document.getElementById('modal-completion-rate').textContent = `${percent}%`;
-    document.getElementById('modal-task-count').textContent = `${completed}/${total}`;
-
-    const today = getTodayString();
-    const saved = state.history[today];
-    textFeeling.value = saved ? (saved.feeling || '') : '';
-    textLearned.value = saved ? (saved.learned || '') : '';
-
-    const warning = document.getElementById('reflection-time-warning');
-    const fields  = document.getElementById('reflection-fields');
-    const saveBtn = document.getElementById('btn-save-reflection');
-
-    if (isReflectionTime()) {
-        warning.style.display = 'none';
-        fields.style.opacity  = '1';
-        fields.style.pointerEvents = 'auto';
-        saveBtn.disabled = false;
-    } else {
-        warning.textContent = '振り返りは22時〜翌2時の間のみ記入できます。';
-        warning.style.display = 'block';
-        fields.style.opacity  = '0.4';
-        fields.style.pointerEvents = 'none';
-        saveBtn.disabled = true;
-    }
-
-    modalReflection.classList.add('active');
-}
-
-function saveReflection() {
-    if (!isReflectionTime()) return;
-
-    const today = getTodayString();
-    const total = state.tasks.length;
-    const completed = state.tasks.filter(t => t.completed).length;
-    const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
-
-    const durationByTag = {};
-    state.tasks.filter(t => t.completed).forEach(t => {
-        const tag = t.tag || 'タスク';
-        if (!durationByTag[tag]) durationByTag[tag] = 0;
-        durationByTag[tag] += (t.duration || 0);
-    });
-
-    const existing = state.history[today] || {};
-    state.history[today] = {
-        ...existing,
-        rate: percent,
-        tasksCompleted: completed,
-        tasksTotal: total,
-        feeling: textFeeling.value.trim(),
-        learned: textLearned.value.trim(),
-        durationByTag
-    };
-
-    saveData();
-    modalReflection.classList.remove('active');
-    alert("振り返りを保存しました！お疲れ様でした。");
 }
 
 // --- History Calendar ---
@@ -2274,13 +1783,7 @@ function showHistoryDetail(dateStr) {
                 <span style="font-size:1.4rem; font-weight:bold; color:${rateColor}">${data.rate}%</span>
             </div>`;
 
-        if (data.feeling) {
-            html += `<div class="history-memo" style="margin-bottom:0.5rem;"><span style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.25rem;">感想</span>${data.feeling.replace(/\n/g, '<br>')}</div>`;
-        }
-        if (data.learned) {
-            html += `<div class="history-memo" style="margin-bottom:1.25rem;"><span style="font-size:0.75rem;color:var(--text-secondary);display:block;margin-bottom:0.25rem;">学んだこと</span>${data.learned.replace(/\n/g, '<br>')}</div>`;
-        }
-        if (!data.feeling && !data.learned && data.memo) {
+        if (data.memo) {
             html += `<div class="history-memo" style="margin-bottom:1.25rem;">${data.memo.replace(/\n/g, '<br>')}</div>`;
         }
     }
