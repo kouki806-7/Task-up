@@ -241,6 +241,11 @@ function initGAPI() {
                     if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
                     return;
                 }
+                // GIS sets the token on gapi.client automatically, but only if
+                // gapi.client is loaded. Explicit setToken() as a safety net.
+                if (window.gapi && gapi.client) {
+                    gapi.client.setToken(resp);
+                }
                 if (driveAuthCallback) {
                     const fn = driveAuthCallback;
                     driveAuthCallback = null;
@@ -2443,7 +2448,9 @@ function renderDiaryView(dateStr) {
                 </a>
             </div>`;
     } else {
-        const canCreate = gapiInited && gisInited;
+        // Drive doc creation only needs GIS (OAuth), not GAPI key auth (gapiInited).
+        // gapiInited is for Calendar key — tying diary to it kept the button permanently disabled.
+        const canCreate = gisInited || !!(window.google && state.settings?.clientId);
         docSection = `
             <div class="diary-doc-card empty">
                 <div class="diary-doc-info">
@@ -2452,7 +2459,7 @@ function renderDiaryView(dateStr) {
                         この日のGoogleドキュメントはまだありません
                     </div>
                 </div>
-                <button id="btn-create-diary-doc" class="btn secondary" ${canCreate ? '' : 'disabled title="Google APIを初期化中..."'}>
+                <button id="btn-create-diary-doc" class="btn secondary" ${canCreate ? '' : 'disabled title="Google Client IDを設定してください"'}>
                     + ドキュメントを作成
                 </button>
             </div>`;
@@ -2551,10 +2558,24 @@ async function createDiaryDoc(dateStr) {
         return;
     }
 
+    // Ensure gapi.client module is loaded before the OAuth callback fires.
+    // If it isn't loaded yet, gapi.client.setToken() won't be called by GIS
+    // and subsequent Drive API calls will fail with 401.
+    if (window.gapi && !gapi.client) {
+        console.log('[Diary] gapi.client が未ロードのため gapi.load("client") を実行');
+        await new Promise(resolve => gapi.load('client', resolve));
+        console.log('[Diary] gapi.client ロード完了');
+    }
+
     const doCreate = async () => {
         try {
-            // Lazily load Drive API discovery if gapi.client.drive is not yet available
-            if (window.gapi && gapi.client && !gapi.client.drive) {
+            if (!window.gapi) throw new Error('gapi が利用できません');
+            // Load gapi.client module if still missing (rare edge case)
+            if (!gapi.client) {
+                await new Promise(resolve => gapi.load('client', resolve));
+            }
+            // Load Drive v3 discovery if not yet loaded
+            if (!gapi.client.drive) {
                 await gapi.client.load('drive', 'v3');
             }
 
