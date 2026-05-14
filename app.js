@@ -204,8 +204,29 @@ function initGAPI() {
                     discoveryDocs: DISCOVERY_DOCS,
                 });
                 gapiInited = true;
-            } catch(e) { console.error("GAPI init error", e); }
+            } catch(e) {
+                console.error("GAPI init error", e);
+                // gapi.client.init() throws when called a second time on an already-initialized
+                // client. If calendar is already loaded, just update the API key and proceed.
+                if (window.gapi && gapi.client && gapi.client.calendar) {
+                    gapi.client.setApiKey(state.settings.apiKey);
+                    gapiInited = true;
+                } else {
+                    // Discovery docs not loaded yet — try loading calendar directly
+                    try {
+                        gapi.client.setApiKey(state.settings.apiKey);
+                        await gapi.client.load('https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest');
+                        gapiInited = true;
+                    } catch(e2) {
+                        console.error("GAPI fallback init error", e2);
+                    }
+                }
+            }
         });
+    } else if (!window.gapi && state.settings && state.settings.apiKey) {
+        // gapi.js not yet loaded — retry once after a short delay
+        setTimeout(initGAPI, 2000);
+        return;
     }
     if (window.google && state.settings && state.settings.clientId) {
         // Main token client: calendar + gmail (used for all existing sync flows)
@@ -998,10 +1019,22 @@ function setupEventListeners() {
 
     const btnSyncGcal = document.getElementById('btn-sync-gcal');
     if (btnSyncGcal) {
-        btnSyncGcal.addEventListener('click', () => {
+        btnSyncGcal.addEventListener('click', async () => {
             if (!gapiInited || !gisInited) {
-                alert("Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。");
-                return;
+                // If gapi/google scripts are now available but initGAPI hasn't completed yet,
+                // try to initialize on-demand before giving up.
+                if ((window.gapi || window.google) && state.settings?.apiKey && state.settings?.clientId) {
+                    initGAPI();
+                    // Wait up to 5 seconds for initialization to complete
+                    for (let i = 0; i < 10; i++) {
+                        await new Promise(r => setTimeout(r, 500));
+                        if (gapiInited && gisInited) break;
+                    }
+                }
+                if (!gapiInited || !gisInited) {
+                    alert("Google APIが初期化されていません。設定画面でキーが正しく入力されているか確認してください。");
+                    return;
+                }
             }
             authCallback = fetchGoogleCalendarEvents;
             
