@@ -181,14 +181,16 @@ let isSilentAuthAttempt = false;
 const DISCOVERY_DOCS = [
     'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest',
     'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+    'https://www.googleapis.com/discovery/v1/apis/docs/v1/rest',
 ];
 // Calendar / Gmail scopes — kept separate from Drive so silent auth never fails
 // due to a new drive.file consent requirement.
 const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/documents';
+const DIARY_DOC_ID = '1dUD73pq2Gx3al3OlQPZFgsLOmGf5ulUvuQHkLRJXi_g';
 
 let tokenClient;       // calendar + gmail
-let driveTokenClient;  // drive.file only — used exclusively for diary doc creation
+let driveTokenClient;  // documents scope — used for diary transcription
 let driveAuthCallback = null;
 
 let gapiInited = false;
@@ -258,8 +260,8 @@ function initGAPI() {
                         return;
                     }
                     driveAuthCallback = null;
-                    const btn = document.getElementById('btn-create-diary-doc');
-                    if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+                    const btn = document.getElementById('btn-transcribe-diary');
+                    if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
                     return;
                 }
                 // GIS sets the token on gapi.client automatically, but only if
@@ -2458,45 +2460,30 @@ function renderDiaryView(dateStr) {
 
     const entry = state.diary[dateStr] || {};
     const localNote = entry.localNote || '';
-    const docId = entry.docId;
-    const webViewLink = entry.webViewLink;
 
     const dateDisplay = new Date(dateStr + 'T12:00:00').toLocaleDateString('ja-JP', {
         year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
     });
 
-    let docSection;
-    if (docId && webViewLink) {
-        docSection = `
-            <div class="diary-doc-card linked">
-                <div class="diary-doc-info">
-                    <span class="diary-doc-icon">📄</span>
-                    <div>
-                        <div class="diary-doc-label">Googleドキュメント</div>
-                        <div class="diary-doc-name">Daily Flow 日記 - ${dateStr}</div>
-                    </div>
+    const canTranscribe = gisInited || !!(window.google && state.settings?.clientId);
+    const docSection = `
+        <div class="diary-doc-card linked">
+            <div class="diary-doc-info">
+                <span class="diary-doc-icon">📄</span>
+                <div>
+                    <div class="diary-doc-label">Googleドキュメント</div>
+                    <div class="diary-doc-name">日記ドキュメント</div>
                 </div>
-                <a href="${webViewLink}" target="_blank" rel="noopener" class="btn primary diary-open-btn">
-                    開いて編集 ↗
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <a href="https://docs.google.com/document/d/${DIARY_DOC_ID}/edit" target="_blank" rel="noopener" class="btn secondary diary-open-btn">
+                    開く ↗
                 </a>
-            </div>`;
-    } else {
-        // Drive doc creation only needs GIS (OAuth), not GAPI key auth (gapiInited).
-        // gapiInited is for Calendar key — tying diary to it kept the button permanently disabled.
-        const canCreate = gisInited || !!(window.google && state.settings?.clientId);
-        docSection = `
-            <div class="diary-doc-card empty">
-                <div class="diary-doc-info">
-                    <span class="diary-doc-icon">📄</span>
-                    <div class="diary-doc-label" style="color:var(--text-secondary);">
-                        この日のGoogleドキュメントはまだありません
-                    </div>
-                </div>
-                <button id="btn-create-diary-doc" class="btn secondary" ${canCreate ? '' : 'disabled title="Google Client IDを設定してください"'}>
-                    + ドキュメントを作成
+                <button id="btn-transcribe-diary" class="btn primary" ${canTranscribe ? '' : 'disabled title="Google Client IDを設定してください"'}>
+                    転記する
                 </button>
-            </div>`;
-    }
+            </div>
+        </div>`;
 
     panel.innerHTML = `
         <h4 class="diary-date-heading">${dateDisplay}</h4>
@@ -2514,10 +2501,10 @@ function renderDiaryView(dateStr) {
         </div>
     `;
 
-    // Create Google Doc
-    const createBtn = document.getElementById('btn-create-diary-doc');
-    if (createBtn) {
-        createBtn.addEventListener('click', () => createDiaryDoc(dateStr));
+    // Transcribe to Google Doc
+    const transcribeBtn = document.getElementById('btn-transcribe-diary');
+    if (transcribeBtn) {
+        transcribeBtn.addEventListener('click', () => transcribeDiaryToDoc(dateStr));
     }
 
     // Save local note
@@ -2554,87 +2541,90 @@ function renderDiaryView(dateStr) {
     }
 }
 
-async function createDiaryDoc(dateStr) {
-    const btn = document.getElementById('btn-create-diary-doc');
-    if (btn) { btn.disabled = true; btn.textContent = '作成中...'; }
+async function transcribeDiaryToDoc(dateStr) {
+    const btn = document.getElementById('btn-transcribe-diary');
+    if (btn) { btn.disabled = true; btn.textContent = '転記中...'; }
 
-    console.log('[Diary] createDiaryDoc — driveTokenClient:', !!driveTokenClient,
-        'gisInited:', gisInited, 'gapiInited:', gapiInited,
-        'window.google:', !!window.google,
-        'clientId:', state.settings?.clientId ? '設定済み' : '未設定');
-
-    // If driveTokenClient isn't ready, re-run initGAPI() (GIS script may have loaded
-    // after the initial 1-second delay)
-    if (!driveTokenClient) {
-        if (!window.google) {
-            console.error('[Diary] window.google が未定義 — GISスクリプトの読み込み失敗');
-            alert('Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。');
-            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
-            return;
-        }
-        if (!state.settings?.clientId) {
-            console.error('[Diary] clientId が設定されていません');
-            alert('設定画面でGoogle Client IDを入力してください。');
-            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
-            return;
-        }
-        console.log('[Diary] driveTokenClient が null のため initGAPI() を再実行します');
-        initGAPI();
-        await new Promise(resolve => setTimeout(resolve, 200));
-        console.log('[Diary] initGAPI() 再実行後 driveTokenClient:', !!driveTokenClient);
-    }
-
-    if (!driveTokenClient) {
-        console.error('[Diary] initGAPI() 後も driveTokenClient が null');
-        alert('Drive APIの初期化に失敗しました。ページを再読み込みしてください。');
-        if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+    const entry = state.diary[dateStr] || {};
+    const noteContent = (entry.localNote || '').trim();
+    if (!noteContent) {
+        alert('転記するメモがありません。先にローカルメモを入力してください。');
+        if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
         return;
     }
 
-    // Ensure gapi.client module is loaded before the OAuth callback fires.
-    // If it isn't loaded yet, gapi.client.setToken() won't be called by GIS
-    // and subsequent Drive API calls will fail with 401.
-    if (window.gapi && !gapi.client) {
-        console.log('[Diary] gapi.client が未ロードのため gapi.load("client") を実行');
-        await new Promise(resolve => gapi.load('client', resolve));
-        console.log('[Diary] gapi.client ロード完了');
+    if (!driveTokenClient) {
+        if (!window.google) {
+            alert('Google Identity Services の読み込みに失敗しました。ページを再読み込みしてください。');
+            if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
+            return;
+        }
+        if (!state.settings?.clientId) {
+            alert('設定画面でGoogle Client IDを入力してください。');
+            if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
+            return;
+        }
+        initGAPI();
+        await new Promise(resolve => setTimeout(resolve, 200));
     }
 
-    const doCreate = async () => {
+    if (!driveTokenClient) {
+        alert('Docs APIの初期化に失敗しました。ページを再読み込みしてください。');
+        if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
+        return;
+    }
+
+    if (window.gapi && !gapi.client) {
+        await new Promise(resolve => gapi.load('client', resolve));
+    }
+
+    const doTranscribe = async () => {
         try {
             if (!window.gapi) throw new Error('gapi が利用できません');
-            // Load gapi.client module if still missing (rare edge case)
             if (!gapi.client) {
                 await new Promise(resolve => gapi.load('client', resolve));
             }
-            // Load Drive v3 discovery if not yet loaded
-            if (!gapi.client.drive) {
-                await gapi.client.load('drive', 'v3');
+            if (!gapi.client.docs) {
+                await gapi.client.load('docs', 'v1');
             }
 
-            const title = `Daily Flow 日記 - ${dateStr}`;
-            const response = await gapi.client.drive.files.create({
+            // Get the document to find the end index for insertion
+            const docRes = await gapi.client.docs.documents.get({ documentId: DIARY_DOC_ID });
+            const bodyContent = docRes.result.body.content;
+            const lastElement = bodyContent[bodyContent.length - 1];
+            // Insert before the final newline character (endIndex - 1)
+            const insertIndex = lastElement.endIndex - 1;
+
+            const dateDisplay = new Date(dateStr + 'T12:00:00').toLocaleDateString('ja-JP', {
+                year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+            });
+            const insertText = `\n${dateDisplay}\n${noteContent}\n`;
+
+            await gapi.client.docs.documents.batchUpdate({
+                documentId: DIARY_DOC_ID,
                 resource: {
-                    name: title,
-                    mimeType: 'application/vnd.google-apps.document',
-                },
-                fields: 'id,webViewLink'
+                    requests: [
+                        {
+                            insertText: {
+                                location: { index: insertIndex },
+                                text: insertText
+                            }
+                        }
+                    ]
+                }
             });
 
-            const { id: docId, webViewLink } = response.result;
-            if (!state.diary[dateStr]) state.diary[dateStr] = {};
-            state.diary[dateStr].docId = docId;
-            state.diary[dateStr].webViewLink = webViewLink;
-            saveData();
-            renderDiaryView(dateStr);
-        } catch (e) {
-            console.error('Diary doc creation failed:', e);
-            alert('Googleドキュメントの作成に失敗しました。\nGoogleアカウントへのアクセスを許可してください。');
-            if (btn) { btn.disabled = false; btn.textContent = '+ ドキュメントを作成'; }
+            alert(`転記しました！\n${dateDisplay} の日記をドキュメントに追加しました。`);
+            if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
+        } catch(e) {
+            console.error('Diary transcribe failed:', e);
+            const msg = e?.result?.error?.message || e?.message || '不明なエラー';
+            alert('転記に失敗しました。\n' + msg);
+            if (btn) { btn.disabled = false; btn.textContent = '転記する'; }
         }
     };
 
-    driveAuthCallback = doCreate;
+    driveAuthCallback = doTranscribe;
     driveTokenClient.requestAccessToken({ prompt: '' });
 }
 
