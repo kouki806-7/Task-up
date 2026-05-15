@@ -26,7 +26,7 @@ let state = {
         isRunning: false,
         accumulatedSeconds: 0
     },
-    diary: {}    // { 'YYYY-MM-DD': { docId, webViewLink, localNote } }
+    diary: {}    // { 'YYYY-MM-DD': { localNote } }
 };
 
 function getTodayString() {
@@ -247,7 +247,7 @@ function initGAPI() {
                 if (authCallback) authCallback();
             },
         });
-        // Drive token client: drive.file only — requested only when creating a diary doc
+        // Docs token client: documents scope — used for diary transcription to fixed Google Doc
         driveTokenClient = google.accounts.oauth2.initTokenClient({
             client_id: state.settings.clientId,
             scope: DRIVE_SCOPE,
@@ -2466,37 +2466,51 @@ function renderDiaryView(dateStr) {
     });
 
     const canTranscribe = gisInited || !!(window.google && state.settings?.clientId);
-    const docSection = `
-        <div class="diary-doc-card linked">
-            <div class="diary-doc-info">
-                <span class="diary-doc-icon">📄</span>
-                <div>
-                    <div class="diary-doc-label">Googleドキュメント</div>
-                    <div class="diary-doc-name">日記ドキュメント</div>
+
+    // Build past log list (all dates with notes, excluding currently selected date, newest first)
+    const logEntries = Object.entries(state.diary)
+        .filter(([d, e]) => e.localNote && e.localNote.trim() && d !== dateStr)
+        .sort(([a], [b]) => b.localeCompare(a));
+
+    const logListHTML = logEntries.length > 0
+        ? logEntries.map(([d, e]) => {
+            const dDisplay = new Date(d + 'T12:00:00').toLocaleDateString('ja-JP', {
+                year: 'numeric', month: 'long', day: 'numeric', weekday: 'short'
+            });
+            const note = e.localNote.trim();
+            const preview = note.replace(/\n/g, ' ').substring(0, 80);
+            const charCount = note.length;
+            return `<div class="diary-log-item" data-date="${d}">
+                <div class="diary-log-meta">
+                    <span class="diary-log-date">${dDisplay}</span>
+                    <span class="diary-log-chars">${charCount}文字</span>
                 </div>
-            </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
-                <a href="https://docs.google.com/document/d/${DIARY_DOC_ID}/edit" target="_blank" rel="noopener" class="btn secondary diary-open-btn">
-                    開く ↗
-                </a>
-                <button id="btn-transcribe-diary" class="btn primary" ${canTranscribe ? '' : 'disabled title="Google Client IDを設定してください"'}>
-                    転記する
-                </button>
-            </div>
-        </div>`;
+                <div class="diary-log-preview">${preview}${note.length > 80 ? '…' : ''}</div>
+            </div>`;
+        }).join('')
+        : '<p class="empty-state" style="padding: 0.75rem 0; font-size: 0.85rem; margin: 0;">まだ過去のログはありません</p>';
 
     panel.innerHTML = `
         <h4 class="diary-date-heading">${dateDisplay}</h4>
 
-        ${docSection}
-
         <div class="diary-note-section">
             <label class="diary-note-label">📝 ローカルメモ <span class="diary-note-hint">（オフライン対応・自動保存）</span></label>
-            <textarea id="diary-local-note" class="diary-textarea" rows="14"
+            <textarea id="diary-local-note" class="diary-textarea" rows="12"
                 placeholder="今日学んだこと、気づいたこと、明日試すこと...">${localNote}</textarea>
             <div class="diary-note-footer">
                 <span id="diary-save-status" class="diary-save-status">保存しました ✓</span>
-                <button id="btn-save-diary-note" class="btn primary">保存</button>
+                <div class="diary-footer-actions">
+                    <a href="https://docs.google.com/document/d/${DIARY_DOC_ID}/edit" target="_blank" rel="noopener" class="btn secondary diary-open-btn">開く ↗</a>
+                    <button id="btn-transcribe-diary" class="btn secondary" ${canTranscribe ? '' : 'disabled title="Google Client IDを設定してください"'}>転記する</button>
+                    <button id="btn-save-diary-note" class="btn primary">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="diary-log-section">
+            <h4 class="diary-log-heading">📋 過去のログ</h4>
+            <div class="diary-log-list" id="diary-log-list">
+                ${logListHTML}
             </div>
         </div>
     `;
@@ -2524,7 +2538,7 @@ function renderDiaryView(dateStr) {
 
     if (saveBtn) saveBtn.addEventListener('click', saveDiaryNote);
 
-    // Ctrl+S / Cmd+S shortcut
+    // Ctrl+S / Cmd+S shortcut + auto-save
     if (noteArea) {
         let _autoSaveTimer = null;
         noteArea.addEventListener('keydown', e => {
@@ -2533,10 +2547,23 @@ function renderDiaryView(dateStr) {
                 saveDiaryNote();
             }
         });
-        // Auto-save after 3 seconds of inactivity
         noteArea.addEventListener('input', () => {
             clearTimeout(_autoSaveTimer);
             _autoSaveTimer = setTimeout(saveDiaryNote, 3000);
+        });
+    }
+
+    // Past log navigation: click an entry to navigate to that date
+    const logList = document.getElementById('diary-log-list');
+    if (logList) {
+        logList.addEventListener('click', e => {
+            const item = e.target.closest('.diary-log-item');
+            if (!item) return;
+            const d = item.dataset.date;
+            if (!d) return;
+            const picker = document.getElementById('diary-date-picker');
+            if (picker) picker.value = d;
+            renderDiaryView(d);
         });
     }
 }

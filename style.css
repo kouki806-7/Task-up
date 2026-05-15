@@ -1408,9 +1408,17 @@ textarea {
 
 .diary-note-footer {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.diary-footer-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .diary-save-status {
@@ -1418,6 +1426,66 @@ textarea {
     color: var(--success-color);
     opacity: 0;
     transition: opacity 0.3s;
+}
+
+/* ── Diary Log (Past Entries) ── */
+.diary-log-section {
+    margin-top: 2rem;
+    border-top: 1px solid var(--panel-border);
+    padding-top: 1.5rem;
+}
+
+.diary-log-heading {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.diary-log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.diary-log-item {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--panel-border);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.diary-log-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--primary-color);
+}
+
+.diary-log-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.3rem;
+}
+
+.diary-log-date {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.diary-log-chars {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.diary-log-preview {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── Rain Forecast Badge ── */
