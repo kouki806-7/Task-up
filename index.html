@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=18">
+    <link rel="stylesheet" href="style.css?v=19">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -51,6 +51,18 @@
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="18" y="3" width="4" height="18"></rect><rect x="10" y="8" width="4" height="13"></rect><rect x="2" y="13" width="4" height="8"></rect></svg>
                     統計
                 </li>
+                <li data-view="health">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                    ヘルス
+                </li>
+                <li data-view="goals">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                    ゴール
+                </li>
+                <li data-view="review">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    レビュー
+                </li>
                 <li data-view="settings">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     設定
@@ -89,13 +101,19 @@
                     </div>
                 </header>
 
+                <!-- Daily Check-in (毎日入力するもの) -->
+                <div id="daily-checkin-bar" class="daily-checkin-bar">
+                    <!-- Cards injected here by JS -->
+                </div>
+
                 <div class="content-grid">
                     <!-- Task Input Area -->
                     <div class="panel input-panel">
-                        <h3>タスクを追加</h3>
+                        <h3>タスクを追加 <button type="button" id="btn-ai-breakdown" class="ai-mini-btn" title="AIでサブタスクを提案">✨ 分解</button></h3>
                         <form id="add-task-form">
-                            <div class="input-group">
-                                <input type="text" id="task-name" placeholder="タスク名を入力..." required>
+                            <div class="input-group" style="position: relative;">
+                                <input type="text" id="task-name" placeholder="タスク名を入力... (例: 明日 10時 英語 30分)" required>
+                                <button type="button" id="btn-voice-task" class="voice-btn" title="音声で入力" aria-label="音声入力">🎤</button>
                             </div>
                             <div class="input-row" style="margin-bottom: 0.75rem;">
                                 <div class="input-group" style="width: 140px; margin-bottom: 0;">
@@ -124,6 +142,19 @@
                                 <button type="submit" class="btn primary" style="white-space: nowrap;">追加</button>
                             </div>
                         </form>
+
+                        <div class="divider"><span>テンプレート</span></div>
+                        <div id="template-buttons" class="template-buttons">
+                            <!-- Weekday templates injected here -->
+                        </div>
+                        <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                            <button id="btn-save-template" type="button" class="btn secondary" style="flex:1; font-size:0.85rem; padding:0.5rem;">今日のタスクをテンプレ保存</button>
+                            <button id="btn-manage-templates" type="button" class="btn secondary" style="flex:1; font-size:0.85rem; padding:0.5rem;">管理</button>
+                        </div>
+
+                        <div class="divider"><span>AIアシスト</span></div>
+                        <button id="btn-ai-plan" type="button" class="btn primary w-full" style="margin-bottom:0.5rem;">✨ 今日の計画を提案</button>
+                        <div id="ai-plan-output" class="ai-plan-output" style="display:none;"></div>
 
                         <div class="divider"><span>または</span></div>
 
@@ -178,10 +209,34 @@
                 </header>
                 <div class="content-grid" style="grid-template-columns: 1fr; max-width: 600px; margin: 0 auto;">
                     <div class="panel" style="text-align: center; padding: 3rem 2rem;">
+                        <!-- Mode Switcher: Normal / Pomodoro -->
+                        <div class="timer-mode-tabs">
+                            <button class="timer-mode-tab active" data-mode="normal">通常</button>
+                            <button class="timer-mode-tab" data-mode="pomodoro">🍅 ポモドーロ</button>
+                        </div>
+                        <div id="pomodoro-controls" class="pomodoro-controls" style="display:none;">
+                            <div class="pom-config-row">
+                                <label>集中
+                                    <input type="number" id="pom-work-mins" min="5" max="120" value="25" style="width:50px;"> 分
+                                </label>
+                                <label>休憩
+                                    <input type="number" id="pom-break-mins" min="1" max="60" value="5" style="width:50px;"> 分
+                                </label>
+                            </div>
+                            <div id="pom-phase-indicator" class="pom-phase-indicator">準備中</div>
+                            <div id="pom-cycle-counter" class="pom-cycle-counter">完了サイクル: 0</div>
+                        </div>
                         <select id="timer-task-select" style="width: 100%; padding: 12px; margin-bottom: 2rem; border-radius: var(--radius-md); background: rgba(0, 0, 0, 0.2); border: 1px solid var(--panel-border); color: var(--text-primary); font-size: 1.1rem;">
                             <option value="">(タスクを選択してください)</option>
                         </select>
-                        <div id="timer-display" style="font-size: 5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 3rem; color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow);">00:00:00</div>
+                        <div id="timer-display" style="font-size: 5rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 1rem; color: var(--primary-color); text-shadow: 0 0 30px var(--primary-glow);">00:00:00</div>
+                        <div id="focus-score-display" class="focus-score-display" style="display:none;">
+                            <span class="fs-label">集中スコア</span>
+                            <span id="fs-value" class="fs-value">100</span>
+                            <span class="fs-divider">·</span>
+                            <span class="fs-label">中断</span>
+                            <span id="fs-interrupts" class="fs-value">0</span>
+                        </div>
                         <div style="display: flex; gap: 0.75rem; justify-content: center; max-width: 500px; margin: 0 auto; flex-wrap: wrap;">
                             <button id="btn-timer-start" class="btn primary" style="flex: 3; padding: 1rem; font-size: 1.1rem; min-width: 150px;">▶ 開始</button>
                             <button id="btn-timer-finish" class="btn secondary" style="flex: 2; padding: 1rem; font-size: 1.1rem; border-color: var(--success-color); color: var(--success-color); min-width: 120px;" disabled>✅ 完了</button>
@@ -251,6 +306,17 @@
                         </div>
                         <button type="submit" class="btn primary">追加</button>
                     </form>
+                </div>
+
+                <!-- Unscheduled Tasks (drag to week grid to time-block) -->
+                <div class="panel" id="unscheduled-tasks-panel" style="margin-bottom: 1rem; padding: 0.85rem 1rem;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; flex-wrap:wrap;">
+                        <span style="font-size:0.9rem; font-weight:600;">📌 未スケジュールのタスク</span>
+                        <span style="font-size:0.75rem; color:var(--text-secondary);">（カレンダーへドラッグで時間ブロック化）</span>
+                    </div>
+                    <div id="unscheduled-tasks-list" class="unscheduled-tasks-list">
+                        <!-- Draggable chips injected here -->
+                    </div>
                 </div>
 
                 <!-- Weekly Vertical Calendar -->
@@ -412,6 +478,147 @@
                 </div>
             </section>
 
+            <!-- Health View -->
+            <section id="view-health" class="view">
+                <header class="view-header">
+                    <div>
+                        <h1>ヘルス</h1>
+                        <p class="subtitle">気分・睡眠・水分・運動を記録</p>
+                    </div>
+                    <input type="date" id="health-date-picker" style="padding: 0.5rem 0.75rem; border-radius: var(--radius-md); background: rgba(0,0,0,0.3); border: 1px solid var(--panel-border); color: var(--text-primary); font-family: inherit; font-size: 0.95rem; cursor: pointer;">
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr;">
+                    <div class="panel">
+                        <h3>気分</h3>
+                        <div id="mood-selector" class="mood-selector">
+                            <button class="mood-btn" data-mood="1" title="とても悪い">😢</button>
+                            <button class="mood-btn" data-mood="2" title="悪い">😕</button>
+                            <button class="mood-btn" data-mood="3" title="普通">😐</button>
+                            <button class="mood-btn" data-mood="4" title="良い">🙂</button>
+                            <button class="mood-btn" data-mood="5" title="とても良い">😄</button>
+                        </div>
+                        <textarea id="mood-note" rows="2" placeholder="気分メモ（任意）..." style="width:100%; margin-top:0.75rem; padding:10px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary); font-family:inherit;"></textarea>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>睡眠</h3>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
+                            <label style="display:flex; align-items:center; gap:0.5rem;">時間
+                                <input type="number" id="sleep-hours" min="0" max="24" step="0.5" placeholder="7.5" style="width:80px; padding:8px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);">
+                            </label>
+                            <label style="display:flex; align-items:center; gap:0.5rem;">質
+                                <select id="sleep-quality" style="padding:8px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);">
+                                    <option value="" style="color:#000">-</option>
+                                    <option value="1" style="color:#000">⭐ 悪い</option>
+                                    <option value="2" style="color:#000">⭐⭐ やや悪い</option>
+                                    <option value="3" style="color:#000">⭐⭐⭐ 普通</option>
+                                    <option value="4" style="color:#000">⭐⭐⭐⭐ 良い</option>
+                                    <option value="5" style="color:#000">⭐⭐⭐⭐⭐ とても良い</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>水分摂取 (杯数)</h3>
+                        <div id="water-tracker" class="water-tracker">
+                            <!-- 8 cup buttons injected here -->
+                        </div>
+                        <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.5rem;">1杯 = 約 200ml</p>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>運動</h3>
+                        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                            <label style="display:flex; align-items:center; gap:0.5rem;">時間
+                                <input type="number" id="exercise-mins" min="0" max="600" placeholder="30" style="width:80px; padding:8px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);"> 分
+                            </label>
+                            <input type="text" id="exercise-type" placeholder="種類（例: 筋トレ、ジョギング）" style="flex:1; min-width:180px; padding:8px; border-radius:8px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);">
+                        </div>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>7日間トレンド</h3>
+                        <div id="health-trends"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Goals View -->
+            <section id="view-goals" class="view">
+                <header class="view-header">
+                    <div>
+                        <h1>ゴール</h1>
+                        <p class="subtitle">長期目標と進捗管理</p>
+                    </div>
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr;">
+                    <div class="panel">
+                        <h3>新しいゴール</h3>
+                        <form id="add-goal-form">
+                            <div class="input-group">
+                                <input type="text" id="goal-title" placeholder="ゴール名（例: TOEIC 900点）" required>
+                            </div>
+                            <div class="input-row" style="margin-bottom:1rem; flex-wrap:wrap;">
+                                <div class="input-group" style="flex:1; min-width:120px; margin-bottom:0;">
+                                    <input type="number" id="goal-target" placeholder="目標値" step="any" required>
+                                </div>
+                                <div class="input-group" style="flex:1; min-width:100px; margin-bottom:0;">
+                                    <input type="text" id="goal-unit" placeholder="単位（点・時間など）">
+                                </div>
+                                <div class="input-group" style="flex:1; min-width:140px; margin-bottom:0;">
+                                    <input type="date" id="goal-deadline" required>
+                                </div>
+                            </div>
+                            <div class="input-row" style="margin-bottom:1rem; flex-wrap:wrap;">
+                                <div class="input-group" style="flex:1; min-width:140px; margin-bottom:0;">
+                                    <select id="goal-tag" style="width:100%; padding:12px 16px; border-radius:var(--radius-md); background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);">
+                                        <option value="" style="color:#000">タグ紐付けなし</option>
+                                        <option value="講義" style="color:#000">講義</option>
+                                        <option value="勉強・課題" style="color:#000">勉強・課題</option>
+                                        <option value="趣味・遊び" style="color:#000">趣味・遊び</option>
+                                        <option value="タスク" style="color:#000">タスク</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn primary">追加</button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>進行中のゴール</h3>
+                        <div id="goals-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Review View -->
+            <section id="view-review" class="view">
+                <header class="view-header">
+                    <div>
+                        <h1>レビュー</h1>
+                        <p class="subtitle">週次・月次の振り返り</p>
+                    </div>
+                    <div style="display:flex; gap:0.5rem;">
+                        <button id="btn-prev-review" class="icon-btn">&larr;</button>
+                        <button id="btn-next-review" class="icon-btn">&rarr;</button>
+                    </div>
+                </header>
+                <div class="content-grid" style="grid-template-columns: 1fr;">
+                    <div class="panel">
+                        <h3 id="review-period-title">今週の振り返り</h3>
+                        <div id="review-content">
+                            <p class="empty-state">レビューを生成中...</p>
+                        </div>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>🔥 ストリーク</h3>
+                        <div id="streak-display" class="streak-display">
+                            <!-- streak data injected here -->
+                        </div>
+                    </div>
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <h3>🏆 月間ハイライト</h3>
+                        <div id="monthly-highlights"></div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Settings View -->
             <section id="view-settings" class="view">
                 <header class="view-header">
@@ -477,6 +684,61 @@
                     </div>
                     
                     <div class="panel">
+                        <h3>🔔 通知設定</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.95rem;">
+                            ブラウザ通知の許可と通知タイミングを設定します。
+                        </p>
+                        <div style="margin-bottom: 1rem;">
+                            <button id="btn-request-notif" class="btn primary">通知を許可</button>
+                            <span id="notif-permission-status" style="margin-left: 1rem; color: var(--text-secondary);"></span>
+                        </div>
+                        <div class="notif-toggle-grid">
+                            <label><input type="checkbox" id="notif-task-before" checked> 予定の10分前に通知</label>
+                            <label><input type="checkbox" id="notif-timer-end" checked> タイマー終了通知</label>
+                            <label><input type="checkbox" id="notif-diary-reminder" checked> 夜の日記リマインド (22:00)</label>
+                            <label><input type="checkbox" id="notif-daily-summary" checked> 朝の日次サマリー (7:00)</label>
+                            <label><input type="checkbox" id="notif-pomodoro" checked> ポモドーロ切替通知</label>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>✨ AI設定</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.95rem;">
+                            Anthropic Claude APIキーを設定すると、より高度な計画提案・日記分析・タスク分解が使えます。<br>
+                            未設定でもヒューリスティック（ルールベース）で動作します。
+                        </p>
+                        <form id="ai-settings-form">
+                            <div class="input-group">
+                                <label for="ai-api-key" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">Anthropic APIキー (sk-ant-...)</label>
+                                <input type="password" id="ai-api-key" placeholder="sk-ant-...">
+                            </div>
+                            <div class="input-group">
+                                <label style="display:flex; align-items:center; gap:0.5rem;">
+                                    <input type="checkbox" id="ai-enabled"> AI機能を有効化（キー設定時）
+                                </label>
+                            </div>
+                            <button type="submit" class="btn primary">AI設定を保存</button>
+                            <span id="ai-save-msg" style="margin-left: 1rem; color: var(--success-color); opacity: 0; transition: opacity 0.3s;">保存しました ✓</span>
+                        </form>
+                    </div>
+
+                    <div class="panel">
+                        <h3>📋 デイリーチェック項目</h3>
+                        <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.95rem;">
+                            毎日ダッシュボードに表示するチェック項目を選択してください。
+                        </p>
+                        <div class="notif-toggle-grid">
+                            <label><input type="checkbox" id="dc-mood" checked> 気分</label>
+                            <label><input type="checkbox" id="dc-sleep" checked> 睡眠</label>
+                            <label><input type="checkbox" id="dc-water" checked> 水分摂取</label>
+                            <label><input type="checkbox" id="dc-exercise" checked> 運動</label>
+                            <label><input type="checkbox" id="dc-diary" checked> 日記</label>
+                            <label><input type="checkbox" id="dc-calorie"> カロリー</label>
+                            <label><input type="checkbox" id="dc-expense"> 支出</label>
+                        </div>
+                    </div>
+
+                    <div class="panel">
                         <h3>表示レイアウト設定</h3>
                         <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.95rem;">
                             画面の表示形式を選択します。「自動判別」は画面サイズに合わせて自動で切り替わります。
@@ -496,6 +758,19 @@
             </section>
 
         </main>
+    </div>
+
+    <!-- Mobile Quick Add FAB -->
+    <button id="mobile-quick-fab" class="mobile-quick-fab" aria-label="クイック追加" title="クイックタスク追加">＋</button>
+
+    <!-- Quick Task Modal (Mobile) -->
+    <div id="quick-task-modal" class="quick-task-modal">
+        <div class="quick-task-modal-inner">
+            <h3>クイック追加</h3>
+            <input type="text" id="quick-task-name" placeholder="例: 明日 10時 英語 30分">
+            <button class="btn primary w-full" id="btn-quick-add-submit">追加</button>
+            <button class="btn secondary w-full" id="btn-quick-add-cancel" style="margin-top:0.5rem;">キャンセル</button>
+        </div>
     </div>
 
     <!-- Timer Completion Modal -->
@@ -529,6 +804,6 @@
             });
         }
     </script>
-    <script src="app.js?v=52"></script>
+    <script src="app.js?v=54"></script>
 </body>
 </html>

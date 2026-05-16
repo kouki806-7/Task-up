@@ -2655,5 +2655,1631 @@ async function transcribeDiaryToDoc(dateStr) {
     driveTokenClient.requestAccessToken({ prompt: '' });
 }
 
-// Start
+// ============================================================
+// NEW FEATURE MODULES (v2.0+)
+//   - Daily Check-in chips
+//   - Pomodoro + Browser Notifications + Focus Score
+//   - Bidirectional Google Calendar + DND time-blocking
+//   - Weekly Review + Streak + Monthly Highlights
+//   - AI Assist (Anthropic API with heuristic fallback)
+//   - Health (mood / sleep / water / exercise)
+//   - Goals (long-term goals with milestones)
+//   - Smart Templates + Voice Input + Mobile Quick FAB
+// ============================================================
+
+// ──────────────────────────────────────────────────────────
+// Extended state initialization (idempotent)
+// ──────────────────────────────────────────────────────────
+function ensureNewState() {
+    if (!state.health) state.health = {};       // { 'YYYY-MM-DD': { mood, moodNote, sleepHours, sleepQuality, waterCups, exerciseMins, exerciseType } }
+    if (!state.goals) state.goals = [];         // [{ id, title, target, current, unit, deadline, linkedTag, milestonesNotified }]
+    if (!state.weeklyReviews) state.weeklyReviews = {};
+    if (!state.templates) state.templates = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] };
+    if (!state.streak) state.streak = { currentStreak: 0, longestStreak: 0, lastActiveDate: '' };
+    if (!state.notifications) state.notifications = {
+        taskBefore: true, timerEnd: true, diaryReminder: true,
+        dailySummary: true, pomodoro: true,
+        firedToday: {} // date-keyed map of which alerts have fired today
+    };
+    if (!state.aiSettings) state.aiSettings = { apiKey: '', enabled: false };
+    if (!state.dailyCheckSettings) state.dailyCheckSettings = {
+        mood: true, sleep: true, water: true, exercise: true, diary: true,
+        calorie: false, expense: false
+    };
+    if (!state.timer.pomodoro) state.timer.pomodoro = {
+        mode: 'normal',           // 'normal' | 'pomodoro'
+        workMins: 25,
+        breakMins: 5,
+        phase: 'work',            // 'work' | 'break'
+        completedCycles: 0,
+        phaseStartTime: null      // when current phase started (ms)
+    };
+    if (!state.timer.focusScore) state.timer.focusScore = { interrupts: 0 };
+}
+
+// Wrap original loadData → ensure new state always exists
+const _origSaveData = saveData;
+const _origLoadData = loadData;
+loadData = function() {
+    _origLoadData();
+    ensureNewState();
+};
+
+// ── Optimization: debounce dashboard render via requestAnimationFrame ──
+// Multiple saveData() calls in the same frame now coalesce into a single render.
+let _dashRenderScheduled = false;
+let _dashViewEl = null;
+function scheduleDashboardRender() {
+    if (_dashRenderScheduled) return;
+    if (!_dashViewEl) _dashViewEl = document.getElementById('view-dashboard');
+    if (!_dashViewEl || !_dashViewEl.classList.contains('active')) return;
+    _dashRenderScheduled = true;
+    requestAnimationFrame(() => {
+        _dashRenderScheduled = false;
+        renderDashboard();
+    });
+}
+
+// Replace saveData with optimized version. Keep localStorage synchronous
+// (so a page refresh right after a change still sees the latest data),
+// but render via rAF and conflict cache invalidation.
+saveData = function() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.warn('localStorage write failed:', e);
+    }
+    _conflictsCacheVersion++;            // invalidate conflict memo
+    scheduleDashboardRender();
+    if (currentUser) scheduleCloudSave();
+};
+
+// Memoized conflicts (invalidated on every saveData)
+let _conflictsCacheVersion = 0;
+let _conflictsCache = { version: -1, set: new Set() };
+
+// Patch fetchCloudData merge: include new sections
+const _origFetchCloudData = fetchCloudData;
+fetchCloudData = async function() {
+    await _origFetchCloudData.apply(this, arguments);
+    ensureNewState();
+};
+
+// Patch saveToCloud to also persist new fields
+saveToCloud = async function() {
+    if (!db || !currentUser) return;
+    try {
+        const syncStatus = document.getElementById('sync-status');
+        if (syncStatus) {
+            syncStatus.textContent = '同期中...';
+            syncStatus.style.color = 'var(--text-secondary)';
+        }
+        const dataToSave = {
+            tasks: state.tasks, routines: state.routines, schedules: state.schedules,
+            history: state.history, lastDate: state.lastDate, settings: state.settings,
+            timer: state.timer, pausedTimers: state.pausedTimers,
+            calories: state.calories, expenses: state.expenses,
+            memos: state.memos, diary: state.diary,
+            health: state.health, goals: state.goals,
+            weeklyReviews: state.weeklyReviews, templates: state.templates,
+            streak: state.streak, notifications: state.notifications,
+            aiSettings: state.aiSettings, dailyCheckSettings: state.dailyCheckSettings
+        };
+        await db.collection('users').doc(currentUser.uid).set(dataToSave);
+        hasPendingCloudSync = false;
+        if (syncStatus) { syncStatus.textContent = '同期済 ✓'; syncStatus.style.color = 'var(--success-color)'; }
+        updateNetworkStatusUI();
+    } catch (e) {
+        console.error("Error saving to cloud", e);
+        hasPendingCloudSync = true;
+        const syncStatus = document.getElementById('sync-status');
+        if (syncStatus) { syncStatus.textContent = '同期失敗 ✕'; syncStatus.style.color = 'var(--danger-color)'; }
+        updateNetworkStatusUI();
+    }
+};
+
+// ──────────────────────────────────────────────────────────
+// Daily Check-in chips on dashboard
+// ──────────────────────────────────────────────────────────
+let _dccBarCache = '';
+function renderDailyCheckinBar() {
+    const bar = document.getElementById('daily-checkin-bar');
+    if (!bar) return;
+    const today = getTodayString();
+    const h = state.health[today] || {};
+    const cfg = state.dailyCheckSettings;
+    const diaryDone = !!(state.diary[today] && state.diary[today].localNote && state.diary[today].localNote.trim());
+    const calDone   = !!(state.calories && state.calories[today] && state.calories[today].length > 0);
+    const expDone   = !!(state.expenses && state.expenses[today] && state.expenses[today].length > 0);
+    const moodIcons = { 1:'😢', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+
+    const chips = [];
+    if (cfg.mood) chips.push({
+        key: 'mood', icon: h.mood ? moodIcons[h.mood] : '🌡️',
+        label: '気分', value: h.mood ? '記録済' : 'タップ', done: !!h.mood, view: 'health'
+    });
+    if (cfg.sleep) chips.push({
+        key: 'sleep', icon: '🌙',
+        label: '睡眠', value: h.sleepHours != null ? `${h.sleepHours}h` : '未入力',
+        done: h.sleepHours != null, view: 'health'
+    });
+    if (cfg.water) chips.push({
+        key: 'water', icon: '💧',
+        label: '水分', value: h.waterCups != null ? `${h.waterCups}/8` : '0/8',
+        done: (h.waterCups || 0) >= 8, view: 'health'
+    });
+    if (cfg.exercise) chips.push({
+        key: 'exercise', icon: '🏃',
+        label: '運動', value: h.exerciseMins != null ? `${h.exerciseMins}分` : '未入力',
+        done: h.exerciseMins != null && h.exerciseMins > 0, view: 'health'
+    });
+    if (cfg.diary) chips.push({
+        key: 'diary', icon: '📝',
+        label: '日記', value: diaryDone ? '記録済' : '未入力', done: diaryDone, view: 'diary'
+    });
+    if (cfg.calorie) chips.push({
+        key: 'calorie', icon: '🍽️',
+        label: 'カロリー', value: calDone ? '記録済' : '未入力', done: calDone, view: 'stats'
+    });
+    if (cfg.expense) chips.push({
+        key: 'expense', icon: '💴',
+        label: '支出', value: expDone ? '記録済' : '未入力', done: expDone, view: 'stats'
+    });
+
+    const newHTML = chips.map(c => `
+        <div class="daily-check-chip ${c.done ? 'done' : ''}" onclick="switchView('${c.view}')" title="${c.label}">
+            <div class="dcc-icon">${c.icon}</div>
+            <div class="dcc-label">${c.label}</div>
+            <div class="dcc-value">${c.value}</div>
+        </div>
+    `).join('');
+    // Skip DOM write if nothing changed (cheap diff via cached string)
+    if (newHTML === _dccBarCache) return;
+    _dccBarCache = newHTML;
+    bar.innerHTML = newHTML;
+}
+
+// ──────────────────────────────────────────────────────────
+// Browser Notifications
+// ──────────────────────────────────────────────────────────
+function notifPermission() {
+    return typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+}
+async function requestNotifPermission() {
+    if (typeof Notification === 'undefined') {
+        alert('このブラウザは通知をサポートしていません。');
+        return 'denied';
+    }
+    const p = await Notification.requestPermission();
+    updateNotifPermissionStatus();
+    return p;
+}
+function updateNotifPermissionStatus() {
+    const el = document.getElementById('notif-permission-status');
+    if (!el) return;
+    const p = notifPermission();
+    if (p === 'granted')      { el.textContent = '✓ 許可済み';    el.style.color = 'var(--success-color)'; }
+    else if (p === 'denied')  { el.textContent = '✕ 拒否されています'; el.style.color = 'var(--danger-color)'; }
+    else                      { el.textContent = '未許可';        el.style.color = 'var(--text-secondary)'; }
+}
+function fireNotification(title, body, tag) {
+    if (notifPermission() !== 'granted') return;
+    try {
+        const n = new Notification(title, { body, tag: tag || 'daily-flow', icon: 'icon.jpg', silent: false });
+        setTimeout(() => n.close(), 8000);
+    } catch (e) { console.warn('Notification failed', e); }
+}
+
+// Reset daily fired-once flags at midnight crossing
+function maybeResetNotifFlags() {
+    const today = getTodayString();
+    if (!state.notifications.firedToday || state.notifications.firedToday._date !== today) {
+        state.notifications.firedToday = { _date: today };
+        // Note: do NOT call saveData here — minor state, persisted on next user action
+    }
+}
+
+// Main scheduler — called every minute
+let _notifCheckInterval = null;
+function startNotifScheduler() {
+    if (_notifCheckInterval) clearInterval(_notifCheckInterval);
+    const tick = () => {
+        if (notifPermission() !== 'granted') return;
+        maybeResetNotifFlags();
+        const fired = state.notifications.firedToday;
+        const now = new Date();
+        const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        const today = getTodayString();
+
+        // 1. Upcoming schedule alert (10 min before start)
+        if (state.notifications.taskBefore) {
+            const todaySchedules = state.schedules.filter(s => s.date === today && s.tag !== 'record');
+            todaySchedules.forEach(s => {
+                const [sh, sm] = s.startTime.split(':').map(Number);
+                const startMs = new Date(today + 'T' + s.startTime + ':00').getTime();
+                const diff = startMs - now.getTime();
+                if (diff > 9 * 60 * 1000 && diff <= 10 * 60 * 1000 + 30000) {
+                    const key = 'pre_' + s.id;
+                    if (!fired[key]) {
+                        fireNotification('🔔 もうすぐ予定', `${s.startTime} 〜 ${s.title}`, key);
+                        fired[key] = true;
+                    }
+                }
+            });
+        }
+
+        // 2. Diary reminder at 22:00
+        if (state.notifications.diaryReminder && hhmm === '22:00' && !fired.diary_reminder) {
+            const diaryDone = !!(state.diary[today] && state.diary[today].localNote && state.diary[today].localNote.trim());
+            if (!diaryDone) {
+                fireNotification('📝 日記の時間', '今日の振り返りを書きましょう。', 'diary_reminder');
+            }
+            fired.diary_reminder = true;
+        }
+
+        // 3. Daily summary at 07:00
+        if (state.notifications.dailySummary && hhmm === '07:00' && !fired.daily_summary) {
+            const todayTasks = state.tasks.filter(t => t.date === today && !t.completed);
+            const todaySched = state.schedules.filter(s => s.date === today && s.tag !== 'record');
+            fireNotification('☀️ おはようございます',
+                `本日のタスク: ${todayTasks.length}件 / 予定: ${todaySched.length}件`, 'daily_summary');
+            fired.daily_summary = true;
+        }
+    };
+    tick();
+    _notifCheckInterval = setInterval(tick, 60 * 1000);
+}
+
+// ──────────────────────────────────────────────────────────
+// Pomodoro Timer
+// ──────────────────────────────────────────────────────────
+let pomodoroAudioCtx = null;
+function pomBeep(freq = 880, duration = 0.2) {
+    try {
+        if (!pomodoroAudioCtx) pomodoroAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = pomodoroAudioCtx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = freq;
+        gain.gain.value = 0.15;
+        osc.connect(gain).connect(ctx.destination);
+        osc.start();
+        setTimeout(() => { osc.stop(); }, duration * 1000);
+    } catch(e) { /* audio disabled */ }
+}
+
+function setTimerMode(mode) {
+    state.timer.pomodoro.mode = mode;
+    const tabs = document.querySelectorAll('.timer-mode-tab');
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+    const ctrl = document.getElementById('pomodoro-controls');
+    if (ctrl) ctrl.style.display = mode === 'pomodoro' ? 'block' : 'none';
+    const fs = document.getElementById('focus-score-display');
+    if (fs) fs.style.display = mode === 'pomodoro' ? 'inline-flex' : 'none';
+    updatePomodoroUI();
+    saveData();
+}
+
+function updatePomodoroUI() {
+    const p = state.timer.pomodoro;
+    const ind = document.getElementById('pom-phase-indicator');
+    const cnt = document.getElementById('pom-cycle-counter');
+    const workIn = document.getElementById('pom-work-mins');
+    const breakIn = document.getElementById('pom-break-mins');
+    if (workIn && !workIn.matches(':focus')) workIn.value = p.workMins;
+    if (breakIn && !breakIn.matches(':focus')) breakIn.value = p.breakMins;
+    if (ind) {
+        if (state.timer.isRunning && p.mode === 'pomodoro') {
+            ind.textContent = p.phase === 'work' ? '🎯 集中フェーズ' : '☕ 休憩フェーズ';
+            ind.className = 'pom-phase-indicator' + (p.phase === 'break' ? ' break' : '');
+        } else {
+            ind.textContent = '準備中';
+            ind.className = 'pom-phase-indicator';
+        }
+    }
+    if (cnt) cnt.textContent = `完了サイクル: ${p.completedCycles}`;
+    const fsV = document.getElementById('fs-value');
+    const fsI = document.getElementById('fs-interrupts');
+    if (fsV) {
+        const ints = state.timer.focusScore.interrupts || 0;
+        const score = Math.max(0, 100 - ints * 10);
+        fsV.textContent = score;
+    }
+    if (fsI) fsI.textContent = state.timer.focusScore.interrupts || 0;
+}
+
+// Pomodoro phase check — uses accumulated work-time (not wall-clock)
+// so pauses don't accidentally trigger phase switches.
+function checkPomodoroPhase() {
+    const p = state.timer.pomodoro;
+    if (p.mode !== 'pomodoro' || !state.timer.isRunning) return;
+    // Effective work time accumulated so far
+    let totalSec = state.timer.accumulatedSeconds;
+    if (state.timer.startTime) totalSec += Math.floor((Date.now() - state.timer.startTime) / 1000);
+    if (p.phaseStartTotalSec == null) {
+        p.phaseStartTotalSec = totalSec;
+        return;
+    }
+    const phaseElapsedSec = totalSec - p.phaseStartTotalSec;
+    const targetMins = p.phase === 'work' ? p.workMins : p.breakMins;
+    if (phaseElapsedSec >= targetMins * 60) {
+        if (p.phase === 'work') {
+            p.completedCycles++;
+            p.phase = 'break';
+            pomBeep(660, 0.3);
+            setTimeout(() => pomBeep(880, 0.3), 350);
+            if (state.notifications.pomodoro) fireNotification('☕ 休憩タイム', `${p.breakMins}分の休憩を取りましょう。`, 'pom_break');
+        } else {
+            p.phase = 'work';
+            pomBeep(880, 0.3);
+            setTimeout(() => pomBeep(660, 0.3), 350);
+            if (state.notifications.pomodoro) fireNotification('🎯 集中タイム', `${p.workMins}分の集中を再開しましょう。`, 'pom_work');
+        }
+        p.phaseStartTotalSec = totalSec;
+        saveData();
+        updatePomodoroUI();
+    }
+}
+
+// Patch runTimerInterval to also check Pomodoro phase + record focus interrupts
+const _origRunTimerInterval = runTimerInterval;
+runTimerInterval = function() {
+    if (timerInterval) clearInterval(timerInterval);
+    updateTimerDisplay();
+    timerInterval = setInterval(() => {
+        updateTimerDisplay();
+        checkPomodoroPhase();
+    }, 1000);
+};
+
+// Track interrupts: when isRunning transitions from true → false and not via Finish
+let _wasRunning = false;
+function trackInterrupt() {
+    if (_wasRunning && !state.timer.isRunning && state.timer.pomodoro.mode === 'pomodoro') {
+        state.timer.focusScore.interrupts = (state.timer.focusScore.interrupts || 0) + 1;
+        updatePomodoroUI();
+    }
+    _wasRunning = state.timer.isRunning;
+}
+
+// Patch syncTimerUI to update Pomodoro elements + track interrupts
+const _origSyncTimerUI = syncTimerUI;
+syncTimerUI = function() {
+    trackInterrupt();
+    _origSyncTimerUI.apply(this, arguments);
+    updatePomodoroUI();
+    // Initialize phase tracking when timer starts in pomodoro mode
+    const p = state.timer.pomodoro;
+    if (state.timer.isRunning && p.mode === 'pomodoro' && p.phaseStartTotalSec == null) {
+        let totalSec = state.timer.accumulatedSeconds;
+        if (state.timer.startTime) totalSec += Math.floor((Date.now() - state.timer.startTime) / 1000);
+        p.phaseStartTotalSec = totalSec;
+        saveData();
+    }
+};
+
+// Hook timer Finish: if pomodoro, fire notification
+const _origShowTimerCompletionModal = showTimerCompletionModal;
+showTimerCompletionModal = function(taskName) {
+    if (state.notifications.timerEnd && document.visibilityState !== 'visible') {
+        fireNotification('⏱ タスク完了', `${taskName || 'タスク'} を達成しました！`, 'timer_end');
+    }
+    _origShowTimerCompletionModal.apply(this, arguments);
+    // Reset Pomodoro phase state
+    state.timer.pomodoro.phaseStartTotalSec = null;
+    state.timer.pomodoro.phaseStartTime = null;
+    state.timer.pomodoro.phase = 'work';
+    state.timer.focusScore.interrupts = 0;
+    updatePomodoroUI();
+};
+
+// ──────────────────────────────────────────────────────────
+// Bidirectional Google Calendar + Drag & Drop
+// ──────────────────────────────────────────────────────────
+const GCAL_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+
+async function gcalWriteEvent(schedule) {
+    if (!gapiInited) return null;
+    const token = gapi.client.getToken();
+    if (!token) return null;
+    try {
+        // Check token has write scope; if not, request
+        if (!token.scope || !token.scope.includes('calendar.events')) {
+            // Request additional scope
+            const writeTokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: state.settings.clientId,
+                scope: GCAL_WRITE_SCOPE,
+                callback: () => {}
+            });
+            await new Promise((resolve, reject) => {
+                writeTokenClient.callback = (r) => r.error ? reject(r) : resolve(r);
+                writeTokenClient.requestAccessToken({ prompt: '' });
+            });
+        }
+        const tz = 'Asia/Tokyo';
+        const startISO = schedule.date + 'T' + schedule.startTime + ':00';
+        const endISO = schedule.date + 'T' + schedule.endTime + ':00';
+        const body = {
+            summary: schedule.title,
+            description: schedule.memo || '',
+            start: { dateTime: startISO, timeZone: tz },
+            end:   { dateTime: endISO,   timeZone: tz }
+        };
+        if (schedule.gcalId) {
+            const res = await gapi.client.calendar.events.update({
+                calendarId: 'primary', eventId: schedule.gcalId, resource: body
+            });
+            return res.result.id;
+        } else {
+            const res = await gapi.client.calendar.events.insert({
+                calendarId: 'primary', resource: body
+            });
+            schedule.gcalId = res.result.id;
+            return res.result.id;
+        }
+    } catch (e) {
+        console.warn('gcalWriteEvent failed:', e);
+        return null;
+    }
+}
+
+// Detect conflicts: two schedules on same date with overlapping times (excluding records)
+// Memoized — recomputes only when state changes (saveData bumps the version).
+function findConflicts() {
+    if (_conflictsCache.version === _conflictsCacheVersion) return _conflictsCache.set;
+    const map = {};
+    state.schedules.forEach(s => {
+        if (s.tag === 'record') return;
+        if (!s.startTime || !s.endTime) return;
+        if (!map[s.date]) map[s.date] = [];
+        map[s.date].push(s);
+    });
+    const conflictIds = new Set();
+    Object.values(map).forEach(arr => {
+        // Precompute minute ranges once
+        const ranges = arr.map(s => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            return { id: s.id, start: sh * 60 + sm, end: eh * 60 + em };
+        });
+        for (let i = 0; i < ranges.length; i++) {
+            for (let j = i + 1; j < ranges.length; j++) {
+                if (ranges[i].start < ranges[j].end && ranges[j].start < ranges[i].end) {
+                    conflictIds.add(ranges[i].id);
+                    conflictIds.add(ranges[j].id);
+                }
+            }
+        }
+    });
+    _conflictsCache = { version: _conflictsCacheVersion, set: conflictIds };
+    return conflictIds;
+}
+
+// Render unscheduled tasks chips above weekly calendar
+function renderUnscheduledTasks() {
+    const list = document.getElementById('unscheduled-tasks-list');
+    if (!list) return;
+    const todayStr = getTodayString();
+    // Tasks not yet completed and not appearing in schedule (no record/title match)
+    const scheduledTitles = new Set(
+        state.schedules.filter(s => s.tag !== 'record').map(s => s.title)
+    );
+    const unsched = state.tasks.filter(t =>
+        !t.completed && t.date >= todayStr && !scheduledTitles.has(t.text)
+    );
+    if (unsched.length === 0) {
+        list.innerHTML = '<span class="unscheduled-empty">全タスクがスケジュール済みです 🎉</span>';
+        return;
+    }
+    list.innerHTML = unsched.map(t => `
+        <div class="unscheduled-task-chip" draggable="true" data-task-id="${t.id}">
+            ${t.text}${t.duration ? ` <small style="color:var(--text-secondary)">(${t.duration}分)</small>` : ''}
+        </div>
+    `).join('');
+    // Drag handlers
+    list.querySelectorAll('.unscheduled-task-chip').forEach(chip => {
+        chip.addEventListener('dragstart', (e) => {
+            chip.classList.add('dragging');
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                type: 'unscheduled-task', taskId: chip.dataset.taskId
+            }));
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+    });
+}
+
+// Wire DND for the weekly schedule timeline columns
+function attachScheduleDND() {
+    const grid = document.getElementById('weekly-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.weekly-timeline').forEach(timeline => {
+        timeline.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            timeline.classList.add('drop-target');
+        });
+        timeline.addEventListener('dragleave', () => timeline.classList.remove('drop-target'));
+        timeline.addEventListener('drop', (e) => {
+            e.preventDefault();
+            timeline.classList.remove('drop-target');
+            let data;
+            try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch { return; }
+            const rect = timeline.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            // y to minutes: timeline starts at 5:00, each minute = 1px (per renderWeeklySchedule)
+            let mins = Math.round(y / 15) * 15; // snap to 15-min
+            const dateStr = timeline.dataset.date;
+            if (!dateStr) return;
+            if (data.type === 'unscheduled-task') {
+                const task = state.tasks.find(t => t.id === data.taskId);
+                if (!task) return;
+                const startTotal = 5 * 60 + mins;
+                const duration = task.duration && task.duration > 0 ? task.duration : 60;
+                const endTotal = startTotal + duration;
+                const pad = n => String(n).padStart(2, '0');
+                const startStr = `${pad(Math.floor(startTotal / 60) % 24)}:${pad(startTotal % 60)}`;
+                const endStr   = `${pad(Math.floor(endTotal / 60) % 24)}:${pad(endTotal % 60)}`;
+                state.schedules.push({
+                    id: generateId(),
+                    title: task.text,
+                    date: dateStr,
+                    startTime: startStr,
+                    endTime: endStr,
+                    tag: task.tag || 'タスク',
+                    memo: '',
+                    linkedTaskId: task.id
+                });
+                saveData();
+                renderWeeklySchedule();
+            } else if (data.type === 'move-schedule') {
+                const s = state.schedules.find(x => x.id === data.scheduleId);
+                if (!s) return;
+                const [sh, sm] = s.startTime.split(':').map(Number);
+                const [eh, em] = s.endTime.split(':').map(Number);
+                const oldDuration = (eh * 60 + em) - (sh * 60 + sm);
+                const startTotal = 5 * 60 + mins;
+                const endTotal = startTotal + oldDuration;
+                const pad = n => String(n).padStart(2, '0');
+                s.date = dateStr;
+                s.startTime = `${pad(Math.floor(startTotal / 60) % 24)}:${pad(startTotal % 60)}`;
+                s.endTime   = `${pad(Math.floor(endTotal / 60) % 24)}:${pad(endTotal % 60)}`;
+                saveData();
+                if (s.gcalId) gcalWriteEvent(s);
+                renderWeeklySchedule();
+            }
+        });
+    });
+}
+
+// Patch renderWeeklySchedule to also: tag conflicts, attach DND, store date on timeline, draggable blocks
+const _origRenderWeeklySchedule = renderWeeklySchedule;
+renderWeeklySchedule = function() {
+    _origRenderWeeklySchedule.apply(this, arguments);
+    const conflicts = findConflicts();
+    // Annotate timeline columns with date for DND
+    const grid = document.getElementById('weekly-grid');
+    if (!grid) return;
+    const isMobile = document.body.classList.contains('mobile-layout');
+    const baseDate = isMobile ? currentWeekStart : getMonday(currentWeekStart);
+    const numDays = isMobile ? 1 : 7;
+    const columns = grid.querySelectorAll('.weekly-column');
+    for (let i = 0; i < numDays && i < columns.length; i++) {
+        const currentDate = new Date(baseDate);
+        currentDate.setDate(currentDate.getDate() + i);
+        const dateStr = currentDate.toLocaleDateString('en-CA');
+        const timeline = columns[i].querySelector('.weekly-timeline');
+        if (timeline) timeline.dataset.date = dateStr;
+        // Mark blocks as draggable + conflict + match by approximate position
+        const blocks = (timeline && timeline.querySelectorAll('.schedule-block')) || [];
+        const daySchedules = state.schedules.filter(s => s.date === dateStr);
+        blocks.forEach((block, idx) => {
+            const sched = daySchedules[idx];
+            if (!sched) return;
+            block.dataset.scheduleId = sched.id;
+            if (sched.tag !== 'record') {
+                block.classList.add('draggable');
+                block.setAttribute('draggable', 'true');
+                block.addEventListener('dragstart', (e) => {
+                    block.classList.add('dragging');
+                    e.dataTransfer.setData('text/plain', JSON.stringify({
+                        type: 'move-schedule', scheduleId: sched.id
+                    }));
+                });
+                block.addEventListener('dragend', () => block.classList.remove('dragging'));
+            }
+            if (conflicts.has(sched.id)) block.classList.add('conflict');
+        });
+    }
+    attachScheduleDND();
+    renderUnscheduledTasks();
+};
+
+// Hook addSchedule form to optionally push to Google Calendar
+// (we just push existing schedules created locally if user has GCal authorized)
+const _origGcalFetchEvents = fetchGoogleCalendarEvents;
+fetchGoogleCalendarEvents = async function(silent) {
+    await _origGcalFetchEvents.apply(this, arguments);
+    // After fetching, also push any local schedules that lack gcalId (writeback)
+    if (!state.settings.gcalAutoWriteback) return; // opt-in
+    const toPush = state.schedules.filter(s => !s.gcalId && s.tag !== 'record' && s.tag !== 'カレンダー');
+    for (const s of toPush) {
+        try { await gcalWriteEvent(s); } catch(e) { /* ignore */ }
+    }
+    saveData();
+};
+
+// ──────────────────────────────────────────────────────────
+// Health (Mood / Sleep / Water / Exercise)
+// ──────────────────────────────────────────────────────────
+let currentHealthDate = '';
+function renderHealthView() {
+    const today = getTodayString();
+    const picker = document.getElementById('health-date-picker');
+    if (!currentHealthDate) currentHealthDate = today;
+    if (picker && !picker.value) picker.value = currentHealthDate;
+    const d = picker ? picker.value : currentHealthDate;
+    currentHealthDate = d;
+    const data = state.health[d] || {};
+
+    // Mood
+    document.querySelectorAll('#mood-selector .mood-btn').forEach(btn => {
+        btn.classList.toggle('selected', String(data.mood || '') === btn.dataset.mood);
+    });
+    const moodNote = document.getElementById('mood-note');
+    if (moodNote && document.activeElement !== moodNote) moodNote.value = data.moodNote || '';
+
+    // Sleep
+    const sh = document.getElementById('sleep-hours');
+    const sq = document.getElementById('sleep-quality');
+    if (sh && document.activeElement !== sh) sh.value = data.sleepHours != null ? data.sleepHours : '';
+    if (sq) sq.value = data.sleepQuality != null ? data.sleepQuality : '';
+
+    // Water cups
+    const cups = data.waterCups || 0;
+    const tracker = document.getElementById('water-tracker');
+    if (tracker) {
+        let html = '';
+        for (let i = 1; i <= 8; i++) {
+            html += `<div class="water-cup ${i <= cups ? 'filled' : ''}" data-cup="${i}">${i <= cups ? '💧' : '○'}</div>`;
+        }
+        tracker.innerHTML = html;
+        tracker.querySelectorAll('.water-cup').forEach(cup => {
+            cup.addEventListener('click', () => {
+                const target = parseInt(cup.dataset.cup);
+                const current = state.health[d]?.waterCups || 0;
+                const newVal = current === target ? target - 1 : target;
+                if (!state.health[d]) state.health[d] = {};
+                state.health[d].waterCups = newVal;
+                saveData();
+                renderHealthView();
+                renderDailyCheckinBar();
+            });
+        });
+    }
+
+    // Exercise
+    const em = document.getElementById('exercise-mins');
+    const et = document.getElementById('exercise-type');
+    if (em && document.activeElement !== em) em.value = data.exerciseMins != null ? data.exerciseMins : '';
+    if (et && document.activeElement !== et) et.value = data.exerciseType || '';
+
+    renderHealthTrends();
+}
+
+function saveHealthField(field, value) {
+    const d = currentHealthDate || getTodayString();
+    if (!state.health[d]) state.health[d] = {};
+    state.health[d][field] = value;
+    saveData();
+    renderDailyCheckinBar();
+}
+
+function renderHealthTrends() {
+    const container = document.getElementById('health-trends');
+    if (!container) return;
+    const today = new Date();
+    const dates = [];
+    for (let i = 6; i >= 0; i--) {
+        const dt = new Date(today);
+        dt.setDate(dt.getDate() - i);
+        dates.push(dt.toLocaleDateString('en-CA'));
+    }
+    const rows = [
+        { key: 'mood', label: '気分', max: 5, color: '#a855f7' },
+        { key: 'sleepHours', label: '睡眠 (h)', max: 10, color: '#3b82f6' },
+        { key: 'waterCups', label: '水分', max: 8, color: '#06b6d4' },
+        { key: 'exerciseMins', label: '運動 (分)', max: 90, color: '#10b981' }
+    ];
+    container.innerHTML = rows.map(r => {
+        const bars = dates.map((d, idx) => {
+            const v = (state.health[d] && state.health[d][r.key]) || 0;
+            const pct = Math.min(100, (v / r.max) * 100);
+            const isToday = idx === dates.length - 1;
+            return `<div class="htr-bar ${isToday ? 'today' : ''}" style="height:${Math.max(2, pct)}%; background:${r.color};" title="${d}: ${v}"></div>`;
+        }).join('');
+        return `<div class="health-trend-row">
+            <div class="htr-label">${r.label}</div>
+            <div class="htr-bars">${bars}</div>
+        </div>`;
+    }).join('');
+}
+
+// ──────────────────────────────────────────────────────────
+// Goals
+// ──────────────────────────────────────────────────────────
+function renderGoals() {
+    const list = document.getElementById('goals-list');
+    if (!list) return;
+    if (state.goals.length === 0) {
+        list.innerHTML = '<p class="empty-state">まだゴールがありません。上のフォームから追加しましょう。</p>';
+        return;
+    }
+    const today = getTodayString();
+    list.innerHTML = state.goals.map(g => {
+        const pct = g.target > 0 ? Math.min(100, Math.round((g.current / g.target) * 100)) : 0;
+        const daysLeft = Math.ceil((new Date(g.deadline) - new Date(today)) / 86400000);
+        const deadlineColor = daysLeft < 0 ? 'var(--danger-color)' : daysLeft < 14 ? '#f59e0b' : 'var(--text-secondary)';
+        // Determine milestone reached
+        let milestoneBadge = '';
+        const milestones = [25, 50, 75, 100];
+        const reached = milestones.filter(m => pct >= m);
+        if (reached.length > 0) {
+            milestoneBadge = `<span class="goal-milestone-badge">${reached[reached.length - 1]}% 達成 🎉</span>`;
+        }
+        return `
+            <div class="goal-card">
+                <div class="goal-card-header">
+                    <div class="goal-title">${g.title}${milestoneBadge}</div>
+                    <div class="goal-deadline" style="color:${deadlineColor}">
+                        ${daysLeft >= 0 ? `あと ${daysLeft} 日` : `${-daysLeft} 日超過`}
+                    </div>
+                </div>
+                <div class="goal-progress-bar">
+                    <div class="goal-progress-fill" style="width:${pct}%"></div>
+                </div>
+                <div class="goal-stats">
+                    <span>${g.current}${g.unit || ''} / ${g.target}${g.unit || ''}</span>
+                    <span>${pct}%</span>
+                </div>
+                <div class="goal-controls">
+                    <input type="number" placeholder="進捗を追加" id="goal-add-${g.id}" step="any">
+                    <button class="btn primary" onclick="addGoalProgress('${g.id}')">+ 加算</button>
+                    <button class="btn secondary" onclick="deleteGoal('${g.id}')">削除</button>
+                </div>
+                ${g.linkedTag ? `<div style="margin-top:0.5rem; font-size:0.78rem; color:var(--text-secondary);">紐付けタグ: ${g.linkedTag}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+function addGoalProgress(id) {
+    const inp = document.getElementById('goal-add-' + id);
+    if (!inp) return;
+    const v = parseFloat(inp.value);
+    if (!v || isNaN(v)) return;
+    const g = state.goals.find(x => x.id === id);
+    if (!g) return;
+    const prevPct = g.target > 0 ? Math.floor((g.current / g.target) * 100) : 0;
+    g.current = (g.current || 0) + v;
+    const newPct = g.target > 0 ? Math.floor((g.current / g.target) * 100) : 0;
+    // Milestone notification
+    const milestones = [25, 50, 75, 100];
+    if (!g.milestonesNotified) g.milestonesNotified = [];
+    milestones.forEach(m => {
+        if (prevPct < m && newPct >= m && !g.milestonesNotified.includes(m)) {
+            g.milestonesNotified.push(m);
+            fireNotification(`🎉 マイルストーン達成!`, `${g.title} が ${m}% 到達しました！`, 'goal_' + g.id + '_' + m);
+            alert(`🎉 ${g.title}: ${m}% 達成！おめでとう！`);
+        }
+    });
+    inp.value = '';
+    saveData();
+    renderGoals();
+}
+
+function deleteGoal(id) {
+    if (!confirm('このゴールを削除しますか？')) return;
+    state.goals = state.goals.filter(g => g.id !== id);
+    saveData();
+    renderGoals();
+}
+
+// Auto-update goal progress when a record is added (link to tag)
+function autoUpdateGoalsFromRecord(taskTag, mins) {
+    if (!taskTag || mins <= 0) return;
+    state.goals.forEach(g => {
+        if (g.linkedTag === taskTag && (g.unit === '時間' || g.unit === 'h')) {
+            const prevPct = g.target > 0 ? Math.floor((g.current / g.target) * 100) : 0;
+            g.current = (g.current || 0) + mins / 60;
+            const newPct = g.target > 0 ? Math.floor((g.current / g.target) * 100) : 0;
+            const milestones = [25, 50, 75, 100];
+            if (!g.milestonesNotified) g.milestonesNotified = [];
+            milestones.forEach(m => {
+                if (prevPct < m && newPct >= m && !g.milestonesNotified.includes(m)) {
+                    g.milestonesNotified.push(m);
+                    fireNotification(`🎉 マイルストーン達成!`, `${g.title} が ${m}% 到達`, 'goal_' + g.id + '_' + m);
+                }
+            });
+        }
+    });
+}
+
+// ──────────────────────────────────────────────────────────
+// Weekly Review + Streak + Monthly Highlights
+// ──────────────────────────────────────────────────────────
+let reviewOffsetWeeks = 0;  // 0 = current week, -1 = last week, etc.
+
+function getWeekDates(offset = 0) {
+    const base = new Date();
+    base.setDate(base.getDate() + offset * 7);
+    const monday = getMonday(base);
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(d.getDate() + i);
+        dates.push(d.toLocaleDateString('en-CA'));
+    }
+    return dates;
+}
+
+function renderReviewView() {
+    const dates = getWeekDates(reviewOffsetWeeks);
+    const titleEl = document.getElementById('review-period-title');
+    const monday = new Date(dates[0]);
+    const sunday = new Date(dates[6]);
+    if (titleEl) {
+        const label = reviewOffsetWeeks === 0 ? '今週' :
+                     reviewOffsetWeeks === -1 ? '先週' : `${-reviewOffsetWeeks}週前`;
+        titleEl.textContent = `${label}の振り返り (${monday.getMonth()+1}/${monday.getDate()} 〜 ${sunday.getMonth()+1}/${sunday.getDate()})`;
+    }
+
+    const container = document.getElementById('review-content');
+    if (!container) return;
+
+    // Aggregate
+    let totalTasks = 0, completedTasks = 0, totalMins = 0;
+    const dayMins = {}; const tagMins = {};
+    dates.forEach(d => {
+        const dayTasks = state.tasks.filter(t => t.date === d);
+        totalTasks += dayTasks.length;
+        completedTasks += dayTasks.filter(t => t.completed).length;
+        const records = state.schedules.filter(s => s.date === d && s.tag === 'record');
+        let m = 0;
+        records.forEach(s => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            let mins = (eh * 60 + em) - (sh * 60 + sm);
+            if (mins < 0) mins += 1440;
+            m += mins;
+            const tag = s.taskTag || 'タスク';
+            tagMins[tag] = (tagMins[tag] || 0) + mins;
+        });
+        dayMins[d] = m;
+        totalMins += m;
+    });
+    const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    const bestDay = Object.entries(dayMins).sort((a, b) => b[1] - a[1])[0];
+    const worstDay = Object.entries(dayMins).filter(([d]) => state.tasks.some(t => t.date === d) || (state.schedules.some(s => s.date === d))).sort((a, b) => a[1] - b[1])[0];
+    const topTag = Object.entries(tagMins).sort((a, b) => b[1] - a[1])[0];
+
+    const dayLabel = (dStr) => {
+        const dt = new Date(dStr + 'T12:00:00');
+        return `${dt.getMonth()+1}/${dt.getDate()}(${['日','月','火','水','木','金','土'][dt.getDay()]})`;
+    };
+
+    container.innerHTML = `
+        <div class="review-section">
+            <div class="review-section-title">主要指標</div>
+            <div class="review-stat-grid">
+                <div class="review-stat-card">
+                    <div class="review-stat-value">${completionRate}%</div>
+                    <div class="review-stat-label">タスク完了率<br>(${completedTasks}/${totalTasks})</div>
+                </div>
+                <div class="review-stat-card">
+                    <div class="review-stat-value">${(totalMins/60).toFixed(1)}h</div>
+                    <div class="review-stat-label">合計記録時間</div>
+                </div>
+                <div class="review-stat-card">
+                    <div class="review-stat-value">${bestDay && bestDay[1] > 0 ? dayLabel(bestDay[0]) : '-'}</div>
+                    <div class="review-stat-label">ベストデー<br>${bestDay && bestDay[1] > 0 ? (bestDay[1]/60).toFixed(1)+'h' : ''}</div>
+                </div>
+                <div class="review-stat-card">
+                    <div class="review-stat-value">${topTag ? topTag[0] : '-'}</div>
+                    <div class="review-stat-label">最多投下タグ<br>${topTag ? (topTag[1]/60).toFixed(1)+'h' : ''}</div>
+                </div>
+            </div>
+        </div>
+        <div class="review-section">
+            <div class="review-section-title">来週のテーマ</div>
+            <input type="text" id="next-week-theme" placeholder="例: 毎日2時間以上の勉強時間"
+                style="width:100%; padding:10px; border-radius:8px; background:rgba(0,0,0,0.25); border:1px solid var(--panel-border); color:var(--text-primary);"
+                value="${(state.weeklyReviews[dates[0]] && state.weeklyReviews[dates[0]].theme) || ''}">
+            <button id="btn-save-theme" class="btn primary" style="margin-top:0.5rem;">保存</button>
+        </div>
+    `;
+
+    document.getElementById('btn-save-theme')?.addEventListener('click', () => {
+        const theme = document.getElementById('next-week-theme').value.trim();
+        if (!state.weeklyReviews[dates[0]]) state.weeklyReviews[dates[0]] = {};
+        state.weeklyReviews[dates[0]].theme = theme;
+        state.weeklyReviews[dates[0]].generatedAt = new Date().toISOString();
+        saveData();
+        alert('保存しました ✓');
+    });
+
+    renderStreak();
+    renderMonthlyHighlights();
+}
+
+function renderStreak() {
+    const display = document.getElementById('streak-display');
+    if (!display) return;
+    // Compute streaks from history + records
+    const activeDates = new Set();
+    Object.keys(state.history).forEach(d => {
+        if (state.history[d].tasksCompleted > 0) activeDates.add(d);
+    });
+    state.schedules.forEach(s => { if (s.tag === 'record') activeDates.add(s.date); });
+
+    // Current streak: consecutive days ending yesterday or today
+    let cur = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const ds = d.toLocaleDateString('en-CA');
+        if (activeDates.has(ds)) cur++;
+        else if (i === 0) continue; // today might not yet have activity
+        else break;
+    }
+    // Longest streak: scan all
+    const sortedDates = Array.from(activeDates).sort();
+    let longest = 0, run = 0, prev = null;
+    sortedDates.forEach(ds => {
+        if (prev) {
+            const diff = (new Date(ds) - new Date(prev)) / 86400000;
+            run = diff === 1 ? run + 1 : 1;
+        } else {
+            run = 1;
+        }
+        if (run > longest) longest = run;
+        prev = ds;
+    });
+
+    state.streak.currentStreak = cur;
+    state.streak.longestStreak = Math.max(longest, state.streak.longestStreak || 0);
+
+    display.innerHTML = `
+        <div class="streak-card">
+            <div class="streak-value">${cur}</div>
+            <div class="streak-label">現在の連続記録 (日)</div>
+        </div>
+        <div class="streak-card">
+            <div class="streak-value">${longest}</div>
+            <div class="streak-label">最長記録 (日)</div>
+        </div>
+        <div class="streak-card">
+            <div class="streak-value">${activeDates.size}</div>
+            <div class="streak-label">累計アクティブ日数</div>
+        </div>
+    `;
+}
+
+function renderMonthlyHighlights() {
+    const container = document.getElementById('monthly-highlights');
+    if (!container) return;
+    const today = new Date();
+    const year = today.getFullYear(), month = today.getMonth();
+    const monthStart = new Date(year, month, 1).toLocaleDateString('en-CA');
+    const monthEnd = new Date(year, month + 1, 0).toLocaleDateString('en-CA');
+
+    // Best concentration day (longest single record)
+    let longestRec = { mins: 0 };
+    let totalMonthMins = 0;
+    const tagTotals = {};
+    state.schedules.forEach(s => {
+        if (s.tag !== 'record') return;
+        if (s.date < monthStart || s.date > monthEnd) return;
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins < 0) mins += 1440;
+        totalMonthMins += mins;
+        if (mins > longestRec.mins) longestRec = { mins, title: s.title, date: s.date };
+        const tag = s.taskTag || 'タスク';
+        tagTotals[tag] = (tagTotals[tag] || 0) + mins;
+    });
+    const topTag = Object.entries(tagTotals).sort((a, b) => b[1] - a[1])[0];
+
+    let bestDay = { mins: 0 };
+    const dayTotals = {};
+    state.schedules.forEach(s => {
+        if (s.tag !== 'record') return;
+        if (s.date < monthStart || s.date > monthEnd) return;
+        const [sh, sm] = s.startTime.split(':').map(Number);
+        const [eh, em] = s.endTime.split(':').map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins < 0) mins += 1440;
+        dayTotals[s.date] = (dayTotals[s.date] || 0) + mins;
+    });
+    Object.entries(dayTotals).forEach(([d, m]) => { if (m > bestDay.mins) bestDay = { mins: m, date: d }; });
+
+    let tasksCompleted = 0;
+    Object.entries(state.history).forEach(([d, h]) => {
+        if (d >= monthStart && d <= monthEnd) tasksCompleted += h.tasksCompleted || 0;
+    });
+
+    const items = [];
+    if (longestRec.mins > 0) items.push({
+        icon: '🎯', title: '最長集中',
+        desc: `${longestRec.title} を ${Math.floor(longestRec.mins/60)}時間${longestRec.mins%60}分 (${longestRec.date})`
+    });
+    if (bestDay.mins > 0) items.push({
+        icon: '⭐', title: 'ベストデー',
+        desc: `${bestDay.date} に ${(bestDay.mins/60).toFixed(1)}時間 投下`
+    });
+    if (topTag) items.push({
+        icon: '🏷️', title: '最多投下タグ',
+        desc: `${topTag[0]} に ${(topTag[1]/60).toFixed(1)}時間`
+    });
+    if (totalMonthMins > 0) items.push({
+        icon: '⏱', title: '今月の合計',
+        desc: `${(totalMonthMins/60).toFixed(1)} 時間 (${tasksCompleted} タスク完了)`
+    });
+    if (items.length === 0) {
+        container.innerHTML = '<p class="empty-state">今月のデータはまだありません。</p>';
+        return;
+    }
+    container.innerHTML = items.map(i => `
+        <div class="highlight-card">
+            <div class="highlight-icon">${i.icon}</div>
+            <div class="highlight-text">
+                <div class="highlight-title">${i.title}</div>
+                <div class="highlight-desc">${i.desc}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ──────────────────────────────────────────────────────────
+// AI Assist (Anthropic API + Heuristic Fallback)
+// ──────────────────────────────────────────────────────────
+async function callClaudeAPI(prompt, system) {
+    const key = (state.aiSettings && state.aiSettings.apiKey) || '';
+    if (!key || !state.aiSettings.enabled) return null;
+    try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': key,
+                'anthropic-version': '2023-06-01',
+                'anthropic-dangerous-direct-browser-access': 'true'
+            },
+            body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 1024,
+                system: system || 'あなたは親身な日本語のアシスタントです。簡潔に答えてください。',
+                messages: [{ role: 'user', content: prompt }]
+            })
+        });
+        if (!res.ok) {
+            console.warn('Claude API error:', res.status);
+            return null;
+        }
+        const data = await res.json();
+        return data.content && data.content[0] && data.content[0].text;
+    } catch (e) { console.warn('Claude API failed:', e); return null; }
+}
+
+// Heuristic daily plan: place tasks into open time slots
+function heuristicDailyPlan() {
+    const today = getTodayString();
+    const tasks = state.tasks.filter(t => t.date === today && !t.completed);
+    if (tasks.length === 0) return [];
+    const occupied = state.schedules
+        .filter(s => s.date === today && s.tag !== 'record')
+        .map(s => {
+            const [sh, sm] = s.startTime.split(':').map(Number);
+            const [eh, em] = s.endTime.split(':').map(Number);
+            return { start: sh * 60 + sm, end: eh * 60 + em };
+        })
+        .sort((a, b) => a.start - b.start);
+    // Find free slots between 9:00 and 22:00
+    const dayStart = 9 * 60, dayEnd = 22 * 60;
+    const free = [];
+    let cursor = dayStart;
+    occupied.forEach(o => {
+        if (o.start > cursor) free.push({ start: cursor, end: Math.min(o.start, dayEnd) });
+        cursor = Math.max(cursor, o.end);
+    });
+    if (cursor < dayEnd) free.push({ start: cursor, end: dayEnd });
+
+    const plan = [];
+    let slotIdx = 0;
+    // Sort tasks by duration descending — fit largest first
+    const sorted = [...tasks].sort((a, b) => (b.duration || 30) - (a.duration || 30));
+    sorted.forEach(t => {
+        const need = (t.duration && t.duration > 0) ? t.duration : 30;
+        while (slotIdx < free.length) {
+            const slot = free[slotIdx];
+            const avail = slot.end - slot.start;
+            if (avail >= need) {
+                const startMins = slot.start;
+                const endMins = slot.start + need;
+                slot.start = endMins + 10; // 10-min buffer
+                if (slot.start >= slot.end) slotIdx++;
+                plan.push({ task: t, startMins, endMins });
+                return;
+            }
+            slotIdx++;
+        }
+    });
+    return plan;
+}
+
+function formatMinsAsTime(m) {
+    const h = Math.floor(m / 60), mm = m % 60;
+    return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
+
+async function generateDailyPlan() {
+    const output = document.getElementById('ai-plan-output');
+    if (!output) return;
+    output.style.display = 'block';
+    output.innerHTML = '<span class="ai-thinking"></span>計画を生成中...';
+
+    // Try Claude API first
+    if (state.aiSettings.enabled && state.aiSettings.apiKey) {
+        const today = getTodayString();
+        const tasksStr = state.tasks
+            .filter(t => t.date === today && !t.completed)
+            .map(t => `- ${t.text} (${t.duration || '?'}分, タグ: ${t.tag})`).join('\n') || 'なし';
+        const schedStr = state.schedules
+            .filter(s => s.date === today && s.tag !== 'record')
+            .map(s => `- ${s.startTime}〜${s.endTime}: ${s.title}`).join('\n') || 'なし';
+        const prompt = `今日のタスクと予定です。9:00〜22:00の中で、空き時間にタスクを配置する計画を提案してください。\n\n【予定】\n${schedStr}\n\n【未完了タスク】\n${tasksStr}\n\n出力形式: 各行を "HH:MM〜HH:MM タスク名" のように1行で書いてください。説明文は不要です。`;
+        const result = await callClaudeAPI(prompt);
+        if (result) {
+            const lines = result.split('\n').filter(l => l.trim()).slice(0, 12);
+            output.innerHTML = lines.map(l => {
+                const m = l.match(/^(\d{1,2}:\d{2}[〜～~-]\d{1,2}:\d{2})\s*(.*)$/);
+                if (m) return `<div class="ai-plan-item"><span class="ai-plan-time">${m[1]}</span><span>${m[2]}</span></div>`;
+                return `<div class="ai-plan-item">${l}</div>`;
+            }).join('');
+            return;
+        }
+    }
+
+    // Fallback: heuristic
+    const plan = heuristicDailyPlan();
+    if (plan.length === 0) {
+        output.innerHTML = '<div class="ai-plan-item">未完了タスクがないか、空き時間が確保できませんでした。</div>';
+        return;
+    }
+    output.innerHTML = plan.map(p => `
+        <div class="ai-plan-item">
+            <span class="ai-plan-time">${formatMinsAsTime(p.startMins)}〜${formatMinsAsTime(p.endMins)}</span>
+            <span>${p.task.text}</span>
+            <button class="btn secondary" style="padding:2px 8px; font-size:0.75rem; margin-left:auto;"
+                onclick="adoptPlanItem('${p.task.id}','${formatMinsAsTime(p.startMins)}','${formatMinsAsTime(p.endMins)}')">採用</button>
+        </div>
+    `).join('') + '<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">※ Claude APIキー未設定のためヒューリスティック生成</div>';
+}
+
+function adoptPlanItem(taskId, startStr, endStr) {
+    const task = state.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    state.schedules.push({
+        id: generateId(),
+        title: task.text,
+        date: getTodayString(),
+        startTime: startStr,
+        endTime: endStr,
+        tag: task.tag || 'タスク',
+        memo: '',
+        linkedTaskId: task.id
+    });
+    saveData();
+    if (document.getElementById('view-schedule').classList.contains('active')) renderWeeklySchedule();
+    alert('スケジュールに追加しました ✓');
+}
+
+// Task breakdown — propose subtasks
+async function aiBreakdownTask() {
+    const inputEl = document.getElementById('task-name');
+    if (!inputEl || !inputEl.value.trim()) {
+        alert('タスク名を入力してから分解ボタンを押してください。');
+        return;
+    }
+    const taskName = inputEl.value.trim();
+    let sub = null;
+    if (state.aiSettings.enabled && state.aiSettings.apiKey) {
+        sub = await callClaudeAPI(
+            `「${taskName}」を3〜5個のサブタスクに分解してください。各行を "- " で始め、簡潔に。説明文は不要。`
+        );
+    }
+    let subtasks = [];
+    if (sub) {
+        subtasks = sub.split('\n').map(l => l.replace(/^[-・*]\s*/, '').trim()).filter(Boolean).slice(0, 5);
+    } else {
+        // Heuristic: split by common patterns
+        subtasks = [
+            `${taskName} - 準備`,
+            `${taskName} - 実行`,
+            `${taskName} - レビュー`
+        ];
+    }
+    if (subtasks.length === 0) return;
+    if (!confirm(`次のサブタスクを今日のタスクに追加しますか？\n\n${subtasks.map(s => '・' + s).join('\n')}`)) return;
+    subtasks.forEach(text => addTask(text, 0, false, 'タスク', getTodayString()));
+    inputEl.value = '';
+    renderDashboard();
+}
+
+// Diary mood analysis: keyword-based
+function analyzeDiaryMood(text) {
+    if (!text) return null;
+    const positiveWords = ['楽しい','嬉しい','幸せ','達成','充実','面白い','よかった','成功','スッキリ','満足','穏やか'];
+    const negativeWords = ['疲れ','辛い','悲しい','イライラ','不安','失敗','後悔','大変','憂鬱','焦','ストレス'];
+    let pos = 0, neg = 0;
+    positiveWords.forEach(w => { if (text.includes(w)) pos++; });
+    negativeWords.forEach(w => { if (text.includes(w)) neg++; });
+    if (pos === 0 && neg === 0) return null;
+    if (pos > neg + 1) return { tone: 'positive', score: pos - neg };
+    if (neg > pos + 1) return { tone: 'negative', score: neg - pos };
+    return { tone: 'neutral', score: 0 };
+}
+
+// ──────────────────────────────────────────────────────────
+// Smart Templates (Weekday-based)
+// ──────────────────────────────────────────────────────────
+const WEEKDAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+const WEEKDAY_LABELS = ['日','月','火','水','木','金','土'];
+
+function renderTemplateButtons() {
+    const cont = document.getElementById('template-buttons');
+    if (!cont) return;
+    const today = new Date();
+    const todayKey = WEEKDAY_KEYS[today.getDay()];
+    cont.innerHTML = WEEKDAY_KEYS.map((k, i) => {
+        const count = (state.templates[k] || []).length;
+        return `<button class="template-btn ${count === 0 ? 'empty' : ''} ${k === todayKey ? 'today' : ''}" data-day="${k}">
+            ${WEEKDAY_LABELS[i]}${count > 0 ? ` (${count})` : ''}
+        </button>`;
+    }).join('');
+    cont.querySelectorAll('.template-btn').forEach(btn => {
+        btn.addEventListener('click', () => applyTemplate(btn.dataset.day));
+    });
+}
+
+function applyTemplate(dayKey) {
+    const tpl = state.templates[dayKey] || [];
+    if (tpl.length === 0) {
+        if (confirm(`${WEEKDAY_LABELS[WEEKDAY_KEYS.indexOf(dayKey)]}曜日のテンプレートはまだ未保存です。今日のタスクを保存しますか？`)) {
+            saveCurrentAsTemplate(dayKey);
+        }
+        return;
+    }
+    if (!confirm(`${tpl.length}個のタスクを追加しますか？`)) return;
+    const today = getTodayString();
+    tpl.forEach(t => {
+        addTask(t.text, t.duration || 0, false, t.tag || 'タスク', today);
+    });
+    renderDashboard();
+}
+
+function saveCurrentAsTemplate(dayKey) {
+    const today = getTodayString();
+    const todayTasks = state.tasks
+        .filter(t => t.date === today && !t.isRoutine)
+        .map(t => ({ text: t.text, duration: t.duration, tag: t.tag }));
+    if (todayTasks.length === 0) {
+        alert('保存できるタスクが見つかりません。');
+        return;
+    }
+    if (!dayKey) {
+        const today = new Date();
+        dayKey = WEEKDAY_KEYS[today.getDay()];
+    }
+    state.templates[dayKey] = todayTasks;
+    saveData();
+    renderTemplateButtons();
+    alert(`${WEEKDAY_LABELS[WEEKDAY_KEYS.indexOf(dayKey)]}曜日のテンプレに ${todayTasks.length}件を保存しました ✓`);
+}
+
+function manageTemplates() {
+    const list = WEEKDAY_KEYS.map((k, i) => {
+        const tpl = state.templates[k] || [];
+        return `${WEEKDAY_LABELS[i]}: ${tpl.length}件 ${tpl.map(t => t.text).join(', ')}`;
+    }).join('\n');
+    const choice = prompt(`テンプレートの状況:\n\n${list}\n\nクリアしたい曜日を入力（日/月/火/水/木/金/土）またはキャンセル:`);
+    if (!choice) return;
+    const idx = WEEKDAY_LABELS.indexOf(choice.trim());
+    if (idx < 0) { alert('無効な入力です'); return; }
+    if (confirm(`${choice}曜日のテンプレを削除しますか？`)) {
+        state.templates[WEEKDAY_KEYS[idx]] = [];
+        saveData();
+        renderTemplateButtons();
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Voice Input (Web Speech API)
+// ──────────────────────────────────────────────────────────
+function startVoiceInput(targetInputId) {
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Rec) { alert('このブラウザは音声入力をサポートしていません。'); return; }
+    const target = document.getElementById(targetInputId);
+    const btn = document.getElementById('btn-voice-task');
+    if (!target) return;
+    const recognition = new Rec();
+    recognition.lang = 'ja-JP';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    if (btn) btn.classList.add('recording');
+    recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        target.value = transcript;
+        if (btn) btn.classList.remove('recording');
+        target.focus();
+    };
+    recognition.onerror = () => { if (btn) btn.classList.remove('recording'); };
+    recognition.onend = () => { if (btn) btn.classList.remove('recording'); };
+    recognition.start();
+}
+
+// ──────────────────────────────────────────────────────────
+// Patch: timer Finish — also auto-update goals
+// ──────────────────────────────────────────────────────────
+const _origAddSchedule = addSchedule;
+
+// Patch the timer-finish handler indirectly: intercept saveData after finish
+// (Simpler approach: hook into the finish handler via observer pattern.)
+// We'll add a wrapper around the finish click handler by re-binding after init.
+
+function rebindTimerFinishForGoals() {
+    const btn = document.getElementById('btn-timer-finish');
+    if (!btn || btn._goalsPatched) return;
+    btn._goalsPatched = true;
+    // We add a CAPTURE-phase listener that fires BEFORE the original handler.
+    // It records the timer info BEFORE the state is cleared.
+    let pre = null;
+    btn.addEventListener('click', (e) => {
+        if (!state.timer || !state.timer.taskId) return;
+        const task = state.tasks.find(t => t.id === state.timer.taskId);
+        let totalSeconds = state.timer.accumulatedSeconds;
+        if (state.timer.isRunning && state.timer.startTime) {
+            totalSeconds += Math.floor((Date.now() - state.timer.startTime) / 1000);
+        }
+        pre = { tag: task && task.tag, mins: Math.floor(totalSeconds / 60) };
+    }, true); // capture
+    btn.addEventListener('click', () => {
+        if (pre && pre.tag && pre.mins >= 1) {
+            autoUpdateGoalsFromRecord(pre.tag, pre.mins);
+            saveData();
+            if (document.getElementById('view-goals').classList.contains('active')) renderGoals();
+        }
+        pre = null;
+    });
+}
+
+// ──────────────────────────────────────────────────────────
+// renderDashboard patch: include daily check-in bar
+// ──────────────────────────────────────────────────────────
+const _origRenderDashboard = renderDashboard;
+renderDashboard = function() {
+    _origRenderDashboard.apply(this, arguments);
+    renderDailyCheckinBar();
+    renderTemplateButtons();
+};
+
+// ──────────────────────────────────────────────────────────
+// View switching patch: route new views
+// ──────────────────────────────────────────────────────────
+const _origSwitchView = switchView;
+switchView = function(viewId) {
+    _origSwitchView.apply(this, arguments);
+    if (viewId === 'health') renderHealthView();
+    else if (viewId === 'goals') renderGoals();
+    else if (viewId === 'review') renderReviewView();
+    else if (viewId === 'settings') {
+        // populate AI settings fields
+        const aiKey = document.getElementById('ai-api-key');
+        const aiEnabled = document.getElementById('ai-enabled');
+        if (aiKey) aiKey.value = state.aiSettings.apiKey || '';
+        if (aiEnabled) aiEnabled.checked = !!state.aiSettings.enabled;
+        // notification toggles
+        const n = state.notifications;
+        ['task-before','timer-end','diary-reminder','daily-summary','pomodoro'].forEach(k => {
+            const el = document.getElementById('notif-' + k);
+            if (el) el.checked = n[k.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] !== false;
+        });
+        // daily check toggles
+        const dc = state.dailyCheckSettings;
+        ['mood','sleep','water','exercise','diary','calorie','expense'].forEach(k => {
+            const el = document.getElementById('dc-' + k);
+            if (el) el.checked = !!dc[k];
+        });
+        updateNotifPermissionStatus();
+    }
+};
+
+// ──────────────────────────────────────────────────────────
+// Setup new event listeners (called after init)
+// ──────────────────────────────────────────────────────────
+function setupNewEventListeners() {
+    // Timer mode tabs
+    document.querySelectorAll('.timer-mode-tab').forEach(tab => {
+        tab.addEventListener('click', () => setTimerMode(tab.dataset.mode));
+    });
+    const workIn = document.getElementById('pom-work-mins');
+    const breakIn = document.getElementById('pom-break-mins');
+    if (workIn) workIn.addEventListener('change', () => {
+        const v = parseInt(workIn.value); if (v >= 5 && v <= 120) { state.timer.pomodoro.workMins = v; saveData(); }
+    });
+    if (breakIn) breakIn.addEventListener('change', () => {
+        const v = parseInt(breakIn.value); if (v >= 1 && v <= 60) { state.timer.pomodoro.breakMins = v; saveData(); }
+    });
+
+    // AI plan / breakdown
+    document.getElementById('btn-ai-plan')?.addEventListener('click', generateDailyPlan);
+    document.getElementById('btn-ai-breakdown')?.addEventListener('click', aiBreakdownTask);
+
+    // Voice input
+    document.getElementById('btn-voice-task')?.addEventListener('click', () => startVoiceInput('task-name'));
+
+    // Templates
+    document.getElementById('btn-save-template')?.addEventListener('click', () => saveCurrentAsTemplate(null));
+    document.getElementById('btn-manage-templates')?.addEventListener('click', manageTemplates);
+
+    // Notifications
+    document.getElementById('btn-request-notif')?.addEventListener('click', requestNotifPermission);
+    ['task-before','timer-end','diary-reminder','daily-summary','pomodoro'].forEach(k => {
+        const el = document.getElementById('notif-' + k);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            const camel = k.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+            state.notifications[camel] = el.checked;
+            saveData();
+        });
+    });
+
+    // Daily check settings
+    ['mood','sleep','water','exercise','diary','calorie','expense'].forEach(k => {
+        const el = document.getElementById('dc-' + k);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            state.dailyCheckSettings[k] = el.checked;
+            saveData();
+            renderDailyCheckinBar();
+        });
+    });
+
+    // AI settings
+    document.getElementById('ai-settings-form')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        state.aiSettings.apiKey = document.getElementById('ai-api-key').value.trim();
+        state.aiSettings.enabled = document.getElementById('ai-enabled').checked;
+        saveData();
+        const msg = document.getElementById('ai-save-msg');
+        if (msg) { msg.style.opacity = '1'; setTimeout(() => msg.style.opacity = '0', 2500); }
+    });
+
+    // Health view inputs
+    document.getElementById('health-date-picker')?.addEventListener('change', renderHealthView);
+    document.querySelectorAll('#mood-selector .mood-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const m = parseInt(btn.dataset.mood);
+            saveHealthField('mood', m);
+            renderHealthView();
+        });
+    });
+    document.getElementById('mood-note')?.addEventListener('blur', (e) => saveHealthField('moodNote', e.target.value));
+    document.getElementById('sleep-hours')?.addEventListener('change', (e) => saveHealthField('sleepHours', parseFloat(e.target.value) || null));
+    document.getElementById('sleep-quality')?.addEventListener('change', (e) => saveHealthField('sleepQuality', e.target.value ? parseInt(e.target.value) : null));
+    document.getElementById('exercise-mins')?.addEventListener('change', (e) => saveHealthField('exerciseMins', parseInt(e.target.value) || null));
+    document.getElementById('exercise-type')?.addEventListener('blur', (e) => saveHealthField('exerciseType', e.target.value));
+
+    // Goals form
+    document.getElementById('add-goal-form')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const title = document.getElementById('goal-title').value.trim();
+        const target = parseFloat(document.getElementById('goal-target').value);
+        const unit = document.getElementById('goal-unit').value.trim();
+        const deadline = document.getElementById('goal-deadline').value;
+        const linkedTag = document.getElementById('goal-tag').value;
+        if (!title || !target || !deadline) return;
+        state.goals.push({
+            id: generateId(), title, target, current: 0, unit, deadline, linkedTag, milestonesNotified: []
+        });
+        saveData();
+        renderGoals();
+        e.target.reset();
+    });
+
+    // Review prev/next
+    document.getElementById('btn-prev-review')?.addEventListener('click', () => {
+        reviewOffsetWeeks--; renderReviewView();
+    });
+    document.getElementById('btn-next-review')?.addEventListener('click', () => {
+        if (reviewOffsetWeeks < 0) { reviewOffsetWeeks++; renderReviewView(); }
+    });
+
+    // Mobile Quick FAB
+    document.getElementById('mobile-quick-fab')?.addEventListener('click', () => {
+        document.getElementById('quick-task-modal').classList.add('active');
+        setTimeout(() => document.getElementById('quick-task-name').focus(), 50);
+    });
+    document.getElementById('btn-quick-add-cancel')?.addEventListener('click', () => {
+        document.getElementById('quick-task-modal').classList.remove('active');
+    });
+    document.getElementById('btn-quick-add-submit')?.addEventListener('click', () => {
+        const v = document.getElementById('quick-task-name').value.trim();
+        if (!v) return;
+        // Use smart parser
+        if (/\d{1,2}:\d{2}/.test(v)) smartParse(v, 'task');
+        else addTask(v, 0, false, 'タスク', getTodayString());
+        document.getElementById('quick-task-name').value = '';
+        document.getElementById('quick-task-modal').classList.remove('active');
+        renderDashboard();
+    });
+    document.getElementById('quick-task-name')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('btn-quick-add-submit').click();
+    });
+
+    // Bind goal helpers to window (since called from inline onclick)
+    window.addGoalProgress = addGoalProgress;
+    window.deleteGoal = deleteGoal;
+    window.adoptPlanItem = adoptPlanItem;
+    window.switchView = switchView;
+    window.resumePausedTimer = resumePausedTimer;
+    window.toggleTask = toggleTask;
+    window.deleteTask = deleteTask;
+    window.toggleMemo = toggleMemo;
+    window.deleteMemo = deleteMemo;
+    window.deleteCalorieRecord = deleteCalorieRecord;
+    window.deleteExpenseRecord = deleteExpenseRecord;
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+        // Skip if typing in an input/textarea
+        if (e.target.matches('input, textarea, select')) return;
+        if ((e.ctrlKey || e.metaKey) || e.altKey) return;
+        if (e.key === 'n' || e.key === 'N') { e.preventDefault(); switchView('dashboard'); document.getElementById('task-name')?.focus(); }
+        else if (e.key === 't' || e.key === 'T') { switchView('timer'); }
+        else if (e.key === 's' || e.key === 'S') { switchView('schedule'); }
+        else if (e.key === 'r' || e.key === 'R') { switchView('review'); }
+        else if (e.key === 'h' || e.key === 'H') { switchView('health'); }
+        else if (e.key === 'g' || e.key === 'G') { switchView('goals'); }
+    });
+}
+
+// ──────────────────────────────────────────────────────────
+// Final init: kick off all new modules
+// ──────────────────────────────────────────────────────────
+ensureNewState();
+
+// Defer until DOM ready (init() already ran from original code)
+function bootstrapNewFeatures() {
+    ensureNewState();
+    setupNewEventListeners();
+    rebindTimerFinishForGoals();
+    renderDailyCheckinBar();
+    renderTemplateButtons();
+    setTimerMode(state.timer.pomodoro.mode || 'normal');
+    startNotifScheduler();
+    updateNotifPermissionStatus();
+    // Save (in case ensureNewState added defaults)
+    saveData();
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(bootstrapNewFeatures, 100);
+} else {
+    document.addEventListener('DOMContentLoaded', bootstrapNewFeatures);
+}
+
+// Start (kept here so existing code paths run)
 init();
