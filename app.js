@@ -1664,6 +1664,7 @@ function renderDashboard() {
             '講義': 'tag-lecture',
             '勉強・課題': 'tag-study',
             '趣味・遊び': 'tag-hobby',
+            '運動': 'tag-exercise',
             'タスク': 'tag-task',
             'カレンダー': 'tag-calendar'
         };
@@ -1796,6 +1797,7 @@ function showHistoryDetail(dateStr) {
         '講義':     '#3b82f6',
         '勉強・課題': '#10b981',
         '趣味・遊び': '#f59e0b',
+        '運動':     '#ec4899',
         'タスク':    '#8b5cf6',
         'カレンダー': '#ef4444',
         'record':   '#f43f5e'
@@ -1804,6 +1806,7 @@ function showHistoryDetail(dateStr) {
         '講義':     'rgba(59, 130, 246, 0.12)',
         '勉強・課題': 'rgba(16, 185, 129, 0.12)',
         '趣味・遊び': 'rgba(245, 158, 11, 0.12)',
+        '運動':     'rgba(236, 72, 153, 0.12)',
         'タスク':    'rgba(139, 92, 246, 0.12)',
         'カレンダー': 'rgba(239, 68, 68, 0.12)',
         'record':   'rgba(244, 63, 94, 0.18)'
@@ -1971,6 +1974,7 @@ function renderStats(period) {
         '講義': 'var(--tag-lecture)',
         '勉強・課題': 'var(--tag-study)',
         '趣味・遊び': 'var(--tag-hobby)',
+        '運動': 'var(--tag-exercise)',
         'タスク': 'var(--tag-task)',
         'カレンダー': 'var(--tag-calendar)'
     };
@@ -2403,6 +2407,7 @@ function renderWeeklySchedule() {
             '講義': 'rgba(59, 130, 246, 0.4)',
             '勉強・課題': 'rgba(16, 185, 129, 0.4)',
             '趣味・遊び': 'rgba(245, 158, 11, 0.4)',
+            '運動': 'rgba(236, 72, 153, 0.4)',
             'タスク': 'rgba(139, 92, 246, 0.4)',
             'カレンダー': 'rgba(239, 68, 68, 0.4)',
             'record': 'rgba(244, 63, 94, 0.6)'
@@ -2412,6 +2417,7 @@ function renderWeeklySchedule() {
             '講義': '#3b82f6',
             '勉強・課題': '#10b981',
             '趣味・遊び': '#f59e0b',
+            '運動': '#ec4899',
             'タスク': '#8b5cf6',
             'カレンダー': '#ef4444',
             'record': '#f43f5e'
@@ -2681,7 +2687,17 @@ function ensureNewState() {
         dailySummary: true, pomodoro: true,
         firedToday: {} // date-keyed map of which alerts have fired today
     };
-    if (!state.aiSettings) state.aiSettings = { apiKey: '', enabled: false };
+    if (!state.aiSettings) state.aiSettings = {
+        provider: 'claude',          // 'claude' | 'ollama' | 'openai-compatible'
+        apiKey: '',                  // Anthropic API key
+        localUrl: 'http://localhost:11434',
+        localModel: 'llama3.2',
+        enabled: false
+    };
+    // Migrate older shape (only apiKey + enabled) by adding new fields with defaults
+    if (state.aiSettings && !state.aiSettings.provider) state.aiSettings.provider = 'claude';
+    if (state.aiSettings && state.aiSettings.localUrl == null) state.aiSettings.localUrl = 'http://localhost:11434';
+    if (state.aiSettings && state.aiSettings.localModel == null) state.aiSettings.localModel = 'llama3.2';
     if (!state.dailyCheckSettings) state.dailyCheckSettings = {
         mood: true, sleep: true, water: true, exercise: true, diary: true,
         calorie: false, expense: false
@@ -2961,6 +2977,7 @@ function setTimerMode(mode) {
 }
 
 function updatePomodoroUI() {
+    if (!state.timer.pomodoro || !state.timer.focusScore) ensureNewState();
     const p = state.timer.pomodoro;
     const ind = document.getElementById('pom-phase-indicator');
     const cnt = document.getElementById('pom-cycle-counter');
@@ -2991,6 +3008,7 @@ function updatePomodoroUI() {
 // Pomodoro phase check — uses accumulated work-time (not wall-clock)
 // so pauses don't accidentally trigger phase switches.
 function checkPomodoroPhase() {
+    if (!state.timer.pomodoro) return;  // post-reset transient state
     const p = state.timer.pomodoro;
     if (p.mode !== 'pomodoro' || !state.timer.isRunning) return;
     // Effective work time accumulated so far
@@ -3035,6 +3053,9 @@ runTimerInterval = function() {
 // Track interrupts: when isRunning transitions from true → false and not via Finish
 let _wasRunning = false;
 function trackInterrupt() {
+    // Defensive: btn-timer-finish/cancel/reset reassign state.timer to a fresh object,
+    // dropping .pomodoro and .focusScore. Re-create them via ensureNewState (idempotent).
+    if (!state.timer.pomodoro || !state.timer.focusScore) ensureNewState();
     if (_wasRunning && !state.timer.isRunning && state.timer.pomodoro.mode === 'pomodoro') {
         state.timer.focusScore.interrupts = (state.timer.focusScore.interrupts || 0) + 1;
         updatePomodoroUI();
@@ -3045,6 +3066,7 @@ function trackInterrupt() {
 // Patch syncTimerUI to update Pomodoro elements + track interrupts
 const _origSyncTimerUI = syncTimerUI;
 syncTimerUI = function() {
+    if (!state.timer.pomodoro || !state.timer.focusScore) ensureNewState();
     trackInterrupt();
     _origSyncTimerUI.apply(this, arguments);
     updatePomodoroUI();
@@ -3065,7 +3087,9 @@ showTimerCompletionModal = function(taskName) {
         fireNotification('⏱ タスク完了', `${taskName || 'タスク'} を達成しました！`, 'timer_end');
     }
     _origShowTimerCompletionModal.apply(this, arguments);
-    // Reset Pomodoro phase state
+    // Defensive: original Finish handler reassigned state.timer to a fresh object;
+    // re-create pomodoro/focusScore via ensureNewState so subsequent calls don't crash.
+    if (!state.timer.pomodoro || !state.timer.focusScore) ensureNewState();
     state.timer.pomodoro.phaseStartTotalSec = null;
     state.timer.pomodoro.phaseStartTime = null;
     state.timer.pomodoro.phase = 'work';
@@ -3745,32 +3769,132 @@ function renderMonthlyHighlights() {
 // ──────────────────────────────────────────────────────────
 // AI Assist (Anthropic API + Heuristic Fallback)
 // ──────────────────────────────────────────────────────────
-async function callClaudeAPI(prompt, system) {
-    const key = (state.aiSettings && state.aiSettings.apiKey) || '';
-    if (!key || !state.aiSettings.enabled) return null;
+// ────────── LLM Dispatcher ──────────
+// Routes the prompt to the configured provider:
+//   - 'claude': Anthropic Claude API (cloud)
+//   - 'ollama': local Ollama server (http://localhost:11434/api/chat)
+//   - 'openai-compatible': LM Studio / llama.cpp / etc. (POST /v1/chat/completions)
+async function callLLM(prompt, system) {
+    if (!state.aiSettings || !state.aiSettings.enabled) return null;
+    const provider = state.aiSettings.provider || 'claude';
+    const sys = system || 'あなたは親身な日本語のアシスタントです。簡潔に答えてください。';
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': key,
-                'anthropic-version': '2023-06-01',
-                'anthropic-dangerous-direct-browser-access': 'true'
-            },
-            body: JSON.stringify({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 1024,
-                system: system || 'あなたは親身な日本語のアシスタントです。簡潔に答えてください。',
-                messages: [{ role: 'user', content: prompt }]
-            })
-        });
-        if (!res.ok) {
-            console.warn('Claude API error:', res.status);
-            return null;
+        if (provider === 'claude') return await callClaudeAPI(prompt, sys);
+        if (provider === 'ollama') return await callOllamaAPI(prompt, sys);
+        if (provider === 'openai-compatible') return await callOpenAICompatibleAPI(prompt, sys);
+    } catch (e) {
+        console.warn('LLM call failed:', e);
+    }
+    return null;
+}
+
+async function callClaudeAPI(prompt, system) {
+    const key = state.aiSettings.apiKey || '';
+    if (!key) return null;
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 1024,
+            system: system,
+            messages: [{ role: 'user', content: prompt }]
+        })
+    });
+    if (!res.ok) { console.warn('Claude API error:', res.status); return null; }
+    const data = await res.json();
+    return data.content && data.content[0] && data.content[0].text;
+}
+
+async function callOllamaAPI(prompt, system) {
+    const baseUrl = (state.aiSettings.localUrl || 'http://localhost:11434').replace(/\/$/, '');
+    const model = state.aiSettings.localModel || 'llama3.2';
+    const res = await fetch(baseUrl + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: prompt }
+            ],
+            stream: false,
+            options: { temperature: 0.7, num_predict: 1024 }
+        })
+    });
+    if (!res.ok) { console.warn('Ollama API error:', res.status); return null; }
+    const data = await res.json();
+    return data.message && data.message.content;
+}
+
+async function callOpenAICompatibleAPI(prompt, system) {
+    const baseUrl = (state.aiSettings.localUrl || 'http://localhost:1234').replace(/\/$/, '');
+    const model = state.aiSettings.localModel || 'local-model';
+    const res = await fetch(baseUrl + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 1024,
+            stream: false
+        })
+    });
+    if (!res.ok) { console.warn('OpenAI-compatible API error:', res.status); return null; }
+    const data = await res.json();
+    return data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+}
+
+// UI: show/hide provider-specific config blocks based on selected provider
+function updateAIProviderUI() {
+    const sel = document.getElementById('ai-provider');
+    if (!sel) return;
+    const claudeBlock = document.getElementById('ai-claude-settings');
+    const localBlock = document.getElementById('ai-local-settings');
+    const urlInput = document.getElementById('ai-local-url');
+    const isClaude = sel.value === 'claude';
+    if (claudeBlock) claudeBlock.style.display = isClaude ? 'block' : 'none';
+    if (localBlock)  localBlock.style.display  = isClaude ? 'none' : 'block';
+    // Set sensible default URL when switching providers and field is empty
+    if (urlInput && !urlInput.value) {
+        urlInput.placeholder = sel.value === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234';
+    }
+}
+
+// Connection test — returns { ok: bool, message: string }
+async function testLLMConnection() {
+    if (!state.aiSettings) return { ok: false, message: '設定がありません' };
+    const provider = state.aiSettings.provider;
+    try {
+        if (provider === 'ollama') {
+            const baseUrl = (state.aiSettings.localUrl || 'http://localhost:11434').replace(/\/$/, '');
+            const res = await fetch(baseUrl + '/api/tags');
+            if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+            const data = await res.json();
+            const models = (data.models || []).map(m => m.name).join(', ');
+            return { ok: true, message: `接続OK ✓ 利用可能モデル: ${models || '(なし)'}` };
         }
-        const data = await res.json();
-        return data.content && data.content[0] && data.content[0].text;
-    } catch (e) { console.warn('Claude API failed:', e); return null; }
+        if (provider === 'openai-compatible') {
+            const baseUrl = (state.aiSettings.localUrl || 'http://localhost:1234').replace(/\/$/, '');
+            const res = await fetch(baseUrl + '/v1/models');
+            if (!res.ok) return { ok: false, message: `HTTP ${res.status}` };
+            const data = await res.json();
+            const models = (data.data || []).map(m => m.id).join(', ');
+            return { ok: true, message: `接続OK ✓ 利用可能モデル: ${models || '(なし)'}` };
+        }
+        return { ok: false, message: 'このプロバイダは接続テスト対象外です' };
+    } catch (e) {
+        return { ok: false, message: `接続失敗: ${e.message}` };
+    }
 }
 
 // Heuristic daily plan: place tasks into open time slots
@@ -3830,8 +3954,12 @@ async function generateDailyPlan() {
     output.style.display = 'block';
     output.innerHTML = '<span class="ai-thinking"></span>計画を生成中...';
 
-    // Try Claude API first
-    if (state.aiSettings.enabled && state.aiSettings.apiKey) {
+    // Try LLM provider first (Claude / Ollama / OpenAI-compatible)
+    const llmReady = state.aiSettings.enabled && (
+        state.aiSettings.provider === 'claude' ? !!state.aiSettings.apiKey :
+        !!state.aiSettings.localUrl
+    );
+    if (llmReady) {
         const today = getTodayString();
         const tasksStr = state.tasks
             .filter(t => t.date === today && !t.completed)
@@ -3840,7 +3968,7 @@ async function generateDailyPlan() {
             .filter(s => s.date === today && s.tag !== 'record')
             .map(s => `- ${s.startTime}〜${s.endTime}: ${s.title}`).join('\n') || 'なし';
         const prompt = `今日のタスクと予定です。9:00〜22:00の中で、空き時間にタスクを配置する計画を提案してください。\n\n【予定】\n${schedStr}\n\n【未完了タスク】\n${tasksStr}\n\n出力形式: 各行を "HH:MM〜HH:MM タスク名" のように1行で書いてください。説明文は不要です。`;
-        const result = await callClaudeAPI(prompt);
+        const result = await callLLM(prompt);
         if (result) {
             const lines = result.split('\n').filter(l => l.trim()).slice(0, 12);
             output.innerHTML = lines.map(l => {
@@ -3858,6 +3986,9 @@ async function generateDailyPlan() {
         output.innerHTML = '<div class="ai-plan-item">未完了タスクがないか、空き時間が確保できませんでした。</div>';
         return;
     }
+    const noteText = llmReady
+        ? '※ LLM応答が取得できなかったためヒューリスティック生成'
+        : '※ AI未設定 (またはOFF) のためヒューリスティック生成';
     output.innerHTML = plan.map(p => `
         <div class="ai-plan-item">
             <span class="ai-plan-time">${formatMinsAsTime(p.startMins)}〜${formatMinsAsTime(p.endMins)}</span>
@@ -3865,7 +3996,7 @@ async function generateDailyPlan() {
             <button class="btn secondary" style="padding:2px 8px; font-size:0.75rem; margin-left:auto;"
                 onclick="adoptPlanItem('${p.task.id}','${formatMinsAsTime(p.startMins)}','${formatMinsAsTime(p.endMins)}')">採用</button>
         </div>
-    `).join('') + '<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">※ Claude APIキー未設定のためヒューリスティック生成</div>';
+    `).join('') + `<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.5rem;">${noteText}</div>`;
 }
 
 function adoptPlanItem(taskId, startStr, endStr) {
@@ -3895,8 +4026,11 @@ async function aiBreakdownTask() {
     }
     const taskName = inputEl.value.trim();
     let sub = null;
-    if (state.aiSettings.enabled && state.aiSettings.apiKey) {
-        sub = await callClaudeAPI(
+    const llmReady = state.aiSettings.enabled && (
+        state.aiSettings.provider === 'claude' ? !!state.aiSettings.apiKey : !!state.aiSettings.localUrl
+    );
+    if (llmReady) {
+        sub = await callLLM(
             `「${taskName}」を3〜5個のサブタスクに分解してください。各行を "- " で始め、簡潔に。説明文は不要。`
         );
     }
@@ -4043,8 +4177,7 @@ function rebindTimerFinishForGoals() {
     const btn = document.getElementById('btn-timer-finish');
     if (!btn || btn._goalsPatched) return;
     btn._goalsPatched = true;
-    // We add a CAPTURE-phase listener that fires BEFORE the original handler.
-    // It records the timer info BEFORE the state is cleared.
+    // CAPTURE-phase listener fires BEFORE the original finish handler clears state.
     let pre = null;
     btn.addEventListener('click', (e) => {
         if (!state.timer || !state.timer.taskId) return;
@@ -4053,13 +4186,36 @@ function rebindTimerFinishForGoals() {
         if (state.timer.isRunning && state.timer.startTime) {
             totalSeconds += Math.floor((Date.now() - state.timer.startTime) / 1000);
         }
-        pre = { tag: task && task.tag, mins: Math.floor(totalSeconds / 60) };
+        pre = {
+            tag: task && task.tag,
+            text: task && task.text,
+            mins: Math.floor(totalSeconds / 60)
+        };
     }, true); // capture
     btn.addEventListener('click', () => {
-        if (pre && pre.tag && pre.mins >= 1) {
-            autoUpdateGoalsFromRecord(pre.tag, pre.mins);
+        if (pre && pre.mins >= 1) {
+            // Goal auto-update for tag-linked goals
+            if (pre.tag) autoUpdateGoalsFromRecord(pre.tag, pre.mins);
+
+            // Exercise auto-recording: tag === '運動' → bump today's exerciseMins
+            if (pre.tag === '運動') {
+                const today = getTodayString();
+                if (!state.health[today]) state.health[today] = {};
+                const cur = state.health[today].exerciseMins || 0;
+                state.health[today].exerciseMins = cur + pre.mins;
+                // Auto-fill exerciseType from task name if empty
+                if (!state.health[today].exerciseType && pre.text) {
+                    state.health[today].exerciseType = pre.text;
+                } else if (state.health[today].exerciseType && pre.text
+                           && !state.health[today].exerciseType.includes(pre.text)) {
+                    state.health[today].exerciseType += ', ' + pre.text;
+                }
+            }
+
             saveData();
             if (document.getElementById('view-goals').classList.contains('active')) renderGoals();
+            if (document.getElementById('view-health').classList.contains('active')) renderHealthView();
+            renderDailyCheckinBar();  // update the dashboard exercise chip
         }
         pre = null;
     });
@@ -4076,20 +4232,37 @@ renderDashboard = function() {
 };
 
 // ──────────────────────────────────────────────────────────
-// View switching patch: route new views
+// View switching patch: route new views + safety cleanup
 // ──────────────────────────────────────────────────────────
 const _origSwitchView = switchView;
 switchView = function(viewId) {
+    // SAFETY: close any open modals on view switch — otherwise a stuck overlay
+    // (timer completion modal, quick-task modal) feels like a frozen screen.
+    document.querySelectorAll('.modal-overlay.active, .quick-task-modal.active')
+        .forEach(m => m.classList.remove('active'));
     _origSwitchView.apply(this, arguments);
     if (viewId === 'health') renderHealthView();
     else if (viewId === 'goals') renderGoals();
     else if (viewId === 'review') renderReviewView();
+    else if (viewId === 'timer') {
+        // Re-sync UI when re-entering timer view (recover from any stuck state)
+        setTimerMode(state.timer.pomodoro.mode || 'normal');
+        updateTimerSelect();
+        syncTimerUI();
+    }
     else if (viewId === 'settings') {
         // populate AI settings fields
         const aiKey = document.getElementById('ai-api-key');
         const aiEnabled = document.getElementById('ai-enabled');
+        const aiProvider = document.getElementById('ai-provider');
+        const aiLocalUrl = document.getElementById('ai-local-url');
+        const aiLocalModel = document.getElementById('ai-local-model');
         if (aiKey) aiKey.value = state.aiSettings.apiKey || '';
         if (aiEnabled) aiEnabled.checked = !!state.aiSettings.enabled;
+        if (aiProvider) aiProvider.value = state.aiSettings.provider || 'claude';
+        if (aiLocalUrl) aiLocalUrl.value = state.aiSettings.localUrl || '';
+        if (aiLocalModel) aiLocalModel.value = state.aiSettings.localModel || '';
+        updateAIProviderUI();
         // notification toggles
         const n = state.notifications;
         ['task-before','timer-end','diary-reminder','daily-summary','pomodoro'].forEach(k => {
@@ -4160,11 +4333,39 @@ function setupNewEventListeners() {
     // AI settings
     document.getElementById('ai-settings-form')?.addEventListener('submit', (e) => {
         e.preventDefault();
+        const prov = document.getElementById('ai-provider').value;
+        state.aiSettings.provider = prov;
         state.aiSettings.apiKey = document.getElementById('ai-api-key').value.trim();
+        state.aiSettings.localUrl = document.getElementById('ai-local-url').value.trim()
+            || (prov === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234');
+        state.aiSettings.localModel = document.getElementById('ai-local-model').value.trim() || 'llama3.2';
         state.aiSettings.enabled = document.getElementById('ai-enabled').checked;
         saveData();
         const msg = document.getElementById('ai-save-msg');
         if (msg) { msg.style.opacity = '1'; setTimeout(() => msg.style.opacity = '0', 2500); }
+    });
+
+    // Provider switcher — show/hide relevant fields
+    document.getElementById('ai-provider')?.addEventListener('change', updateAIProviderUI);
+
+    // Connection test
+    document.getElementById('btn-ai-test')?.addEventListener('click', async () => {
+        // Save current form values into state first so the test uses them
+        const prov = document.getElementById('ai-provider').value;
+        state.aiSettings.provider = prov;
+        state.aiSettings.localUrl = document.getElementById('ai-local-url').value.trim()
+            || (prov === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234');
+        state.aiSettings.localModel = document.getElementById('ai-local-model').value.trim() || 'llama3.2';
+        const result = document.getElementById('ai-test-result');
+        if (result) {
+            result.style.color = 'var(--text-secondary)';
+            result.textContent = 'テスト中...';
+        }
+        const r = await testLLMConnection();
+        if (result) {
+            result.textContent = r.message;
+            result.style.color = r.ok ? 'var(--success-color)' : 'var(--danger-color)';
+        }
     });
 
     // Health view inputs
@@ -4242,6 +4443,25 @@ function setupNewEventListeners() {
     window.deleteCalorieRecord = deleteCalorieRecord;
     window.deleteExpenseRecord = deleteExpenseRecord;
 
+    // Backdrop click closes modals (timer completion + quick task)
+    function attachModalDismiss(modalId) {
+        const modal = document.getElementById(modalId);
+        if (!modal) return;
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.classList.remove('active');
+        });
+    }
+    attachModalDismiss('timer-completion-modal');
+    attachModalDismiss('quick-task-modal');
+
+    // Escape key closes any open modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal-overlay.active, .quick-task-modal.active')
+                .forEach(m => m.classList.remove('active'));
+        }
+    });
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
         // Skip if typing in an input/textarea
@@ -4249,19 +4469,16 @@ function setupNewEventListeners() {
         if ((e.ctrlKey || e.metaKey) || e.altKey) return;
         if (e.key === 'n' || e.key === 'N') { e.preventDefault(); switchView('dashboard'); document.getElementById('task-name')?.focus(); }
         else if (e.key === 't' || e.key === 'T') { switchView('timer'); }
-        else if (e.key === 's' || e.key === 'S') { switchView('schedule'); }
         else if (e.key === 'r' || e.key === 'R') { switchView('review'); }
         else if (e.key === 'h' || e.key === 'H') { switchView('health'); }
         else if (e.key === 'g' || e.key === 'G') { switchView('goals'); }
     });
 }
 
-// ──────────────────────────────────────────────────────────
+
 // Final init: kick off all new modules
-// ──────────────────────────────────────────────────────────
 ensureNewState();
 
-// Defer until DOM ready (init() already ran from original code)
 function bootstrapNewFeatures() {
     ensureNewState();
     setupNewEventListeners();
@@ -4271,15 +4488,13 @@ function bootstrapNewFeatures() {
     setTimerMode(state.timer.pomodoro.mode || 'normal');
     startNotifScheduler();
     updateNotifPermissionStatus();
-    // Save (in case ensureNewState added defaults)
     saveData();
 }
 
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
+if (document.readyState === "complete" || document.readyState === "interactive") {
     setTimeout(bootstrapNewFeatures, 100);
 } else {
-    document.addEventListener('DOMContentLoaded', bootstrapNewFeatures);
+    document.addEventListener("DOMContentLoaded", bootstrapNewFeatures);
 }
 
-// Start (kept here so existing code paths run)
 init();

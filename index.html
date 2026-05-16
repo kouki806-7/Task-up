@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=19">
+    <link rel="stylesheet" href="style.css?v=21">
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
     <!-- Firebase SDKs (Compat version for simplicity in pure JS) -->
@@ -122,6 +122,7 @@
                                         <option value="講義" style="color: #000">講義</option>
                                         <option value="勉強・課題" style="color: #000">勉強・課題</option>
                                         <option value="趣味・遊び" style="color: #000">趣味・遊び</option>
+                                        <option value="運動" style="color: #000">運動</option>
                                         <option value="カレンダー" style="color: #000">カレンダー</option>
                                     </select>
                                 </div>
@@ -288,6 +289,7 @@
                                     <option value="講義" style="color: #000">講義</option>
                                     <option value="勉強・課題" style="color: #000">勉強・課題</option>
                                     <option value="趣味・遊び" style="color: #000">趣味・遊び</option>
+                                    <option value="運動" style="color: #000">運動</option>
                                     <option value="カレンダー" style="color: #000">カレンダー</option>
                                 </select>
                             </div>
@@ -573,6 +575,7 @@
                                         <option value="講義" style="color:#000">講義</option>
                                         <option value="勉強・課題" style="color:#000">勉強・課題</option>
                                         <option value="趣味・遊び" style="color:#000">趣味・遊び</option>
+                                        <option value="運動" style="color:#000">運動</option>
                                         <option value="タスク" style="color:#000">タスク</option>
                                     </select>
                                 </div>
@@ -704,17 +707,53 @@
                     <div class="panel">
                         <h3>✨ AI設定</h3>
                         <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.95rem;">
-                            Anthropic Claude APIキーを設定すると、より高度な計画提案・日記分析・タスク分解が使えます。<br>
+                            AI機能（計画提案・日記分析・タスク分解）に使用するLLMを選択できます。<br>
                             未設定でもヒューリスティック（ルールベース）で動作します。
                         </p>
                         <form id="ai-settings-form">
                             <div class="input-group">
-                                <label for="ai-api-key" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">Anthropic APIキー (sk-ant-...)</label>
-                                <input type="password" id="ai-api-key" placeholder="sk-ant-...">
+                                <label for="ai-provider" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">プロバイダ</label>
+                                <select id="ai-provider" style="width:100%; padding:12px; border-radius:var(--radius-md); background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); color:var(--text-primary);">
+                                    <option value="claude" style="color:#000">Anthropic Claude (クラウド)</option>
+                                    <option value="ollama" style="color:#000">Ollama (ローカル)</option>
+                                    <option value="openai-compatible" style="color:#000">OpenAI互換 (LM Studio / llama.cpp など)</option>
+                                </select>
                             </div>
+
+                            <!-- Claude settings -->
+                            <div id="ai-claude-settings" class="ai-provider-block">
+                                <div class="input-group">
+                                    <label for="ai-api-key" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">Anthropic APIキー (sk-ant-...)</label>
+                                    <input type="password" id="ai-api-key" placeholder="sk-ant-...">
+                                </div>
+                            </div>
+
+                            <!-- Local LLM settings -->
+                            <div id="ai-local-settings" class="ai-provider-block" style="display:none;">
+                                <div class="input-group">
+                                    <label for="ai-local-url" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">エンドポイントURL</label>
+                                    <input type="text" id="ai-local-url" placeholder="http://localhost:11434">
+                                    <p style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.4rem;">
+                                        例: Ollama = <code>http://localhost:11434</code>　LM Studio = <code>http://localhost:1234</code>
+                                    </p>
+                                </div>
+                                <div class="input-group">
+                                    <label for="ai-local-model" style="display:block; margin-bottom: 0.5rem; font-weight: 500;">モデル名</label>
+                                    <input type="text" id="ai-local-model" placeholder="例: llama3.2, qwen2.5, gemma2">
+                                </div>
+                                <div style="background:rgba(245, 158, 11, 0.08); border:1px solid rgba(245, 158, 11, 0.25); border-radius:8px; padding:0.75rem; font-size:0.82rem; color:#fbbf24; margin-bottom:1rem;">
+                                    ⚠️ <strong>CORS設定が必要です</strong><br>
+                                    ブラウザからローカルLLMに接続するには、サーバ側でCORS許可が必要です。<br>
+                                    <strong>Ollama:</strong> 環境変数 <code>OLLAMA_ORIGINS=*</code> を設定してから <code>ollama serve</code><br>
+                                    <strong>LM Studio:</strong> 「Local Server」タブで「Enable CORS」をオン
+                                </div>
+                                <button type="button" id="btn-ai-test" class="btn secondary" style="margin-bottom:1rem;">接続テスト</button>
+                                <span id="ai-test-result" style="margin-left:0.5rem; font-size:0.9rem;"></span>
+                            </div>
+
                             <div class="input-group">
                                 <label style="display:flex; align-items:center; gap:0.5rem;">
-                                    <input type="checkbox" id="ai-enabled"> AI機能を有効化（キー設定時）
+                                    <input type="checkbox" id="ai-enabled"> AI機能を有効化
                                 </label>
                             </div>
                             <button type="submit" class="btn primary">AI設定を保存</button>
@@ -804,6 +843,6 @@
             });
         }
     </script>
-    <script src="app.js?v=54"></script>
+    <script src="app.js?v=57"></script>
 </body>
 </html>

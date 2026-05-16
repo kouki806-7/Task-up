@@ -12,6 +12,7 @@
     --tag-lecture: #3b82f6;
     --tag-study: #10b981;
     --tag-hobby: #f59e0b;
+    --tag-exercise: #ec4899;
     --tag-task: #8b5cf6;
     --tag-calendar: #ef4444;
     --sidebar-width: 260px;
@@ -432,6 +433,7 @@ textarea {
 .tag-badge.tag-lecture { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
 .tag-badge.tag-study { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
 .tag-badge.tag-hobby { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+.tag-badge.tag-exercise { background: rgba(236, 72, 153, 0.2); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }
 .tag-badge.tag-task { background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3); }
 .tag-badge.tag-calendar { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
 
@@ -2185,3 +2187,11 @@ body.mobile-layout .mobile-quick-fab {
     vertical-align: middle;
 }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
+
+/* AI provider settings */
+.ai-provider-block { margin-bottom: 0.5rem; }
+#ai-test-result {
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
